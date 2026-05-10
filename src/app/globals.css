@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+:root {
+  /* Brand palette (locked — per wellspring-build-brief.md §Visual Identity) */
+  --brand-green: #39900e;
+  --brand-green-dark: #2a6b0a;
+  --brand-green-darkest: #1f4d08;
+  --brand-tint: #f7fee7;
+  --brand-border: #d9f99d;
+
+  /* Warm CTA accent */
+  --cta-amber: #f59e0b;
+
+  /* Neutrals */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-default: #e2e8f0;
+  --page-bg: #f8fafc;
+  --card-bg: #ffffff;
+
+  /* Status */
+  --success: #16a34a;
+  --error: #dc2626;
+}
+
+@theme inline {
+  --color-brand-green: var(--brand-green);
+  --color-brand-green-dark: var(--brand-green-dark);
+  --color-brand-green-darkest: var(--brand-green-darkest);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-border: var(--brand-border);
+  --color-cta-amber: var(--cta-amber);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border-default: var(--border-default);
+  --color-page-bg: var(--page-bg);
+  --color-card-bg: var(--card-bg);
+  --color-success: var(--success);
+  --color-error: var(--error);
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
