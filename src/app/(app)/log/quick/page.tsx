@@ -10,11 +10,14 @@ import {
   Card,
   Check,
   ChipFilter,
+  EditCategoryModal,
+  EditItemModal,
   EmptyState,
   H2,
   Minus,
   NewCategoryModal,
   NewItemModal,
+  Pencil,
   Plus,
   PrimaryButton,
   PageHeader,
@@ -22,6 +25,7 @@ import {
   TextInput,
   Toast,
   TopAppBar,
+  Trash2,
   Zap,
 } from "../../../components/wellspring/shared";
 import {
@@ -69,6 +73,9 @@ export default function QuickPickPage() {
   // holds the category to pre-select. Otherwise we fall back to the active
   // chip (or none if "All" is active).
   const [newItemCategoryId, setNewItemCategoryId] = React.useState<string | undefined>(undefined);
+  // Edit-mode targets: null = closed, otherwise the row to edit.
+  const [editingItem, setEditingItem] = React.useState<CatalogItem | null>(null);
+  const [editingCategory, setEditingCategory] = React.useState<Category | null>(null);
 
   React.useEffect(() => {
     const ac = new AbortController();
@@ -222,6 +229,93 @@ export default function QuickPickPage() {
     setActiveCategoryId(cat.id);
   };
 
+  // PATCH from EditItemModal — replace the row in `items` and any selected
+  // row that references it (so the visible name/unit/price stay in sync).
+  const handleItemSaved = (updated: CatalogItem) => {
+    setItems((prev) => {
+      const next = prev.map((i) => (i.id === updated.id ? updated : i));
+      return next.sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setSelected((prev) =>
+      prev.map((r) =>
+        r.itemId === updated.id
+          ? {
+              ...r,
+              itemName: updated.name,
+              categoryId: updated.categoryId,
+              unit: updated.defaultUnit,
+              unitPrice: updated.estimatedValuePerUnit,
+            }
+          : r,
+      ),
+    );
+  };
+
+  // DELETE from the trash icon — soft-archives the catalog row, removes it
+  // from the visible grid, and drops it from the active selection.
+  const handleItemDelete = async (item: CatalogItem) => {
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(`Remove "${item.name}" from the catalog?`);
+      if (!ok) return;
+    }
+    try {
+      await apiClient.deleteCatalogItem(item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      setSelected((prev) => prev.filter((r) => r.itemId !== item.id));
+      setSuccessToast(`Removed ${item.name} from catalog`);
+    } catch (err) {
+      if (err instanceof ApiClientError) setErrorToast(toastForCode(err.code, err.message));
+      else setErrorToast(toastForCode("INTERNAL"));
+    }
+  };
+
+  // PATCH from EditCategoryModal — replace the row in `categories`, then
+  // resnapshot the denormalized name/unit on every catalog item that lives
+  // under it (so the section header + item tiles update without a refetch).
+  const handleCategorySaved = (updated: Category) => {
+    apiClient.invalidateCategoriesCache();
+    setCategories((prev) => {
+      const next = prev.map((c) => (c.id === updated.id ? updated : c));
+      return next.sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setItems((prev) =>
+      prev.map((i) =>
+        i.categoryId === updated.id
+          ? { ...i, categoryName: updated.name, programName: updated.programName }
+          : i,
+      ),
+    );
+    setSelected((prev) =>
+      prev.map((r) =>
+        r.categoryId === updated.id ? { ...r, categoryId: updated.id } : r,
+      ),
+    );
+  };
+
+  // DELETE category — archives + removes from the chip rail. Items in that
+  // category remain in the local list but are filtered out of the grid as
+  // their categoryId no longer matches an active chip.
+  const handleCategoryDelete = async (cat: Category) => {
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        `Remove the "${cat.name}" category? Items in it will be hidden from Quick Pick but existing donations stay intact.`,
+      );
+      if (!ok) return;
+    }
+    try {
+      await apiClient.deleteCategory(cat.id);
+      apiClient.invalidateCategoriesCache();
+      setCategories((prev) => prev.filter((c) => c.id !== cat.id));
+      setItems((prev) => prev.filter((i) => i.categoryId !== cat.id));
+      setSelected((prev) => prev.filter((r) => r.categoryId !== cat.id));
+      if (activeCategoryId === cat.id) setActiveCategoryId("all");
+      setSuccessToast(`Removed ${cat.name}`);
+    } catch (err) {
+      if (err instanceof ApiClientError) setErrorToast(toastForCode(err.code, err.message));
+      else setErrorToast(toastForCode("INTERNAL"));
+    }
+  };
+
   // Push the new item into the local catalog, jump to its category chip so
   // it's visible in the grid, and add it to the current selection so the
   // volunteer can keep going.
@@ -330,10 +424,36 @@ export default function QuickPickPage() {
           />
         ) : (
           <div className="flex flex-col gap-5">
-            {grouped.map((g) => (
+            {grouped.map((g) => {
+              const cat = categories.find((c) => c.id === g.categoryId) ?? null;
+              return (
               <section key={g.categoryId} className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-3">
-                  <H2>{g.categoryName}</H2>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <H2>{g.categoryName}</H2>
+                    {cat && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCategory(cat)}
+                          aria-label={`Edit ${cat.name}`}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-slate-100"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          <Pencil size={13} strokeWidth={1.75} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCategoryDelete(cat)}
+                          aria-label={`Remove ${cat.name}`}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-red-50"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          <Trash2 size={13} strokeWidth={1.75} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -372,13 +492,16 @@ export default function QuickPickPage() {
                           onRemove={() => removeItem(it.id)}
                           onChangeQuantity={(n) => updateRow(it.id, { quantity: n })}
                           onChangeValue={(v) => updateRow(it.id, { estimatedValue: v })}
+                          onEdit={() => setEditingItem(it)}
+                          onDelete={() => handleItemDelete(it)}
                         />
                       );
                     })}
                   </div>
                 )}
               </section>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -431,6 +554,21 @@ export default function QuickPickPage() {
         }
         onCreated={handleNewItemCreated}
       />
+
+      <EditItemModal
+        item={editingItem}
+        categories={categories}
+        isOpen={editingItem !== null}
+        onClose={() => setEditingItem(null)}
+        onSaved={handleItemSaved}
+      />
+
+      <EditCategoryModal
+        category={editingCategory}
+        isOpen={editingCategory !== null}
+        onClose={() => setEditingCategory(null)}
+        onSaved={handleCategorySaved}
+      />
     </>
   );
 }
@@ -442,6 +580,8 @@ function ItemTile({
   onRemove,
   onChangeQuantity,
   onChangeValue,
+  onEdit,
+  onDelete,
 }: {
   item: CatalogItem;
   selectedRow: SelectedRow | undefined;
@@ -449,6 +589,8 @@ function ItemTile({
   onRemove: () => void;
   onChangeQuantity: (next: number) => void;
   onChangeValue: (next: number) => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   // Local string buffers so the user can erase to empty without us snapping back to "0".
   // Refs track the last value we emitted upward so the resync effect doesn't loop back
@@ -481,11 +623,27 @@ function ItemTile({
   }, [selectedRow]);
 
   if (!selectedRow) {
+    // Wrapper is a div (not a button) so the Edit/Trash icon-buttons inside
+    // it don't end up nested inside another button (invalid HTML). Click /
+    // keyboard activation on the wrapper still triggers onAdd.
+    const handleActivate = (e: React.SyntheticEvent) => {
+      const target = e.target as HTMLElement;
+      // Ignore clicks/keys that originated inside an action button.
+      if (target.closest("[data-tile-action]")) return;
+      onAdd();
+    };
     return (
-      <button
-        type="button"
-        onClick={onAdd}
-        className="flex flex-col gap-2 rounded-[12px] bg-white p-3 text-left transition hover:bg-slate-50"
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={handleActivate}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleActivate(e);
+          }
+        }}
+        className="flex cursor-pointer flex-col gap-2 rounded-[12px] bg-white p-3 text-left transition hover:bg-slate-50"
         style={{
           border: "1px solid var(--border-default)",
           boxShadow: "0 1px 3px rgba(15, 23, 42, 0.08)",
@@ -505,8 +663,38 @@ function ItemTile({
             <Plus size={14} strokeWidth={1.75} />
           </span>
         </div>
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{item.defaultUnit}</span>
-      </button>
+        <div className="flex items-center justify-between gap-2">
+          <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{item.defaultUnit}</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              data-tile-action
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              aria-label={`Edit ${item.name}`}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-slate-100"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <Pencil size={12} strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              data-tile-action
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              aria-label={`Remove ${item.name}`}
+              className="inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-red-50"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              <Trash2 size={12} strokeWidth={1.75} />
+            </button>
+          </div>
+        </div>
+      </div>
     );
   }
 

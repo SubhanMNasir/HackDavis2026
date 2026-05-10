@@ -21,6 +21,8 @@ import {
   X,
   Check,
   AlertTriangle,
+  Pencil,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { getInitials } from "../../../lib/format-name";
@@ -1210,12 +1212,19 @@ export function NewCategoryModal({
 export function NewItemModal({
   categories,
   defaultCategoryId,
+  defaultName,
+  defaultUnit: defaultUnitProp,
+  defaultValuePerUnit,
   isOpen,
   onClose,
   onCreated,
 }: {
   categories: import("@/lib/types").Category[];
   defaultCategoryId?: string;
+  /** Prefill — used when AI Review opens "Save to catalog" for a not_in_catalog row. */
+  defaultName?: string;
+  defaultUnit?: import("@/lib/types").Unit;
+  defaultValuePerUnit?: number;
   isOpen: boolean;
   onClose: () => void;
   onCreated: (item: import("@/lib/types").CatalogItem) => void;
@@ -1226,27 +1235,40 @@ export function NewItemModal({
   const [valueText, setValueText] = React.useState<string>("");
   const [submitting, setSubmitting] = React.useState(false);
   const [fieldError, setFieldError] = React.useState<string | null>(null);
+  // Track whether the user has hand-picked a category; if not, category-driven
+  // unit auto-sync should still fire. Once they pick, an explicit defaultUnit
+  // prefill (from AI Review) wins and we stop auto-syncing on category change.
+  const [unitDirty, setUnitDirty] = React.useState(false);
 
   // Reset state when reopening; preselect defaultCategoryId or first category.
   // Sync default unit to the picked category so a "Produce" pick prefills lbs.
   React.useEffect(() => {
     if (isOpen) {
-      setName("");
-      setValueText("");
+      setName(defaultName ?? "");
+      setValueText(
+        defaultValuePerUnit !== undefined && Number.isFinite(defaultValuePerUnit)
+          ? String(defaultValuePerUnit)
+          : "",
+      );
       setFieldError(null);
       setSubmitting(false);
       const initialId = defaultCategoryId ?? categories[0]?.id ?? "";
       setCategoryId(initialId);
       const initialCat = categories.find((c) => c.id === initialId);
-      setDefaultUnit(initialCat?.defaultUnit ?? "count");
+      // Explicit unit prefill (e.g. AI Review save-to-catalog) wins over the
+      // category-driven default.
+      setDefaultUnit(defaultUnitProp ?? initialCat?.defaultUnit ?? "count");
+      setUnitDirty(defaultUnitProp !== undefined);
     }
-  }, [isOpen, defaultCategoryId, categories]);
+  }, [isOpen, defaultCategoryId, defaultName, defaultUnitProp, defaultValuePerUnit, categories]);
 
-  // When the user picks a different category, refresh the suggested unit.
+  // When the user picks a different category, refresh the suggested unit
+  // unless they've explicitly supplied one (defaultUnitProp).
   React.useEffect(() => {
+    if (unitDirty) return;
     const cat = categories.find((c) => c.id === categoryId);
     if (cat) setDefaultUnit(cat.defaultUnit);
-  }, [categoryId, categories]);
+  }, [categoryId, categories, unitDirty]);
 
   const handleSubmit = async () => {
     setFieldError(null);
@@ -1357,6 +1379,256 @@ export function NewItemModal({
 }
 
 // ---------------------------------------------------------------------------
+// Edit Item Modal — PATCH /api/catalog/:id. Same shape as NewItemModal but
+// preloaded with an existing item; on save bubbles the updated CatalogItem
+// up so screens can patch local state.
+// ---------------------------------------------------------------------------
+
+export function EditItemModal({
+  item,
+  categories,
+  isOpen,
+  onClose,
+  onSaved,
+}: {
+  item: import("@/lib/types").CatalogItem | null;
+  categories: import("@/lib/types").Category[];
+  isOpen: boolean;
+  onClose: () => void;
+  onSaved: (item: import("@/lib/types").CatalogItem) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [categoryId, setCategoryId] = React.useState<string>("");
+  const [unit, setUnit] = React.useState<import("@/lib/types").Unit>("count");
+  const [valueText, setValueText] = React.useState<string>("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && item) {
+      setName(item.name);
+      setCategoryId(item.categoryId);
+      setUnit(item.defaultUnit);
+      setValueText(String(item.estimatedValuePerUnit));
+      setFieldError(null);
+      setSubmitting(false);
+    }
+  }, [isOpen, item]);
+
+  const handleSubmit = async () => {
+    if (!item) return;
+    setFieldError(null);
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setFieldError("Item name is required.");
+      return;
+    }
+    if (!categoryId) {
+      setFieldError("Pick a category for this item.");
+      return;
+    }
+    const value = Number(valueText);
+    if (!Number.isFinite(value) || value < 0) {
+      setFieldError("Estimated value per unit must be zero or more.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { apiClient } = await import("../../lib/api-client");
+      const updated = await apiClient.updateCatalogItem(item.id, {
+        name: trimmed,
+        categoryId,
+        defaultUnit: unit,
+        estimatedValuePerUnit: value,
+      });
+      onSaved(updated);
+      onClose();
+    } catch (err) {
+      const e = err as { code?: string; message?: string; name?: string };
+      if (e?.name === "ApiClientError" && e.code === "CONFLICT") {
+        setFieldError("An item with this name already exists in that category.");
+      } else if (e?.name === "ApiClientError" && e.code === "VALIDATION_ERROR") {
+        setFieldError(e.message || "Please check the form and try again.");
+      } else {
+        setFieldError(e?.message || "Couldn't save the item. Please try again.");
+      }
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
+      title="Edit item"
+      footer={
+        <>
+          <SecondaryButton type="button" onClick={onClose} disabled={submitting}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton type="button" fullWidth={false} onClick={handleSubmit} disabled={submitting}>
+            {submitting ? "Saving…" : "Save changes"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <Field label="Item name" required error={fieldError ?? undefined}>
+        <TextInput
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+
+      <Field label="Category" required>
+        <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="" disabled>
+            Pick a category…
+          </option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {c.programName}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <Field label="Default measurement">
+        <Segmented<import("@/lib/types").Unit>
+          ariaLabel="Default measurement"
+          options={[
+            { value: "count", label: "Count" },
+            { value: "lbs", label: "Lbs" },
+          ]}
+          value={unit}
+          onChange={setUnit}
+        />
+      </Field>
+
+      <Field
+        label="Estimated value per unit"
+        required
+        hint="USD. Used to prefill the dollar field when a volunteer picks this item."
+      >
+        <MoneyInput
+          placeholder="0.00"
+          inputMode="decimal"
+          value={valueText}
+          onChange={(e) => setValueText(e.target.value)}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit Category Modal — PATCH /api/categories/:id. Program is intentionally
+// not editable (matches the PATCH route, which only accepts name + defaultUnit).
+// ---------------------------------------------------------------------------
+
+export function EditCategoryModal({
+  category,
+  isOpen,
+  onClose,
+  onSaved,
+}: {
+  category: import("@/lib/types").Category | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onSaved: (category: import("@/lib/types").Category) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [defaultUnit, setDefaultUnit] = React.useState<import("@/lib/types").Unit>("count");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen && category) {
+      setName(category.name);
+      setDefaultUnit(category.defaultUnit);
+      setFieldError(null);
+      setSubmitting(false);
+    }
+  }, [isOpen, category]);
+
+  const handleSubmit = async () => {
+    if (!category) return;
+    setFieldError(null);
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setFieldError("Category name is required.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { apiClient } = await import("../../lib/api-client");
+      const updated = await apiClient.updateCategory(category.id, {
+        name: trimmed,
+        defaultUnit,
+      });
+      apiClient.invalidateCategoriesCache();
+      onSaved(updated);
+      onClose();
+    } catch (err) {
+      const e = err as { code?: string; message?: string; name?: string };
+      if (e?.name === "ApiClientError" && e.code === "CONFLICT") {
+        setFieldError("A category with this name already exists in that program.");
+      } else if (e?.name === "ApiClientError" && e.code === "VALIDATION_ERROR") {
+        setFieldError(e.message || "Please check the form and try again.");
+      } else {
+        setFieldError(e?.message || "Couldn't save the category. Please try again.");
+      }
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
+      title="Edit category"
+      footer={
+        <>
+          <SecondaryButton type="button" onClick={onClose} disabled={submitting}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton type="button" fullWidth={false} onClick={handleSubmit} disabled={submitting}>
+            {submitting ? "Saving…" : "Save changes"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <Field label="Category name" required error={fieldError ?? undefined}>
+        <TextInput
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+
+      <Field
+        label="Default measurement"
+        hint="Used as the suggested unit for new items in this category."
+      >
+        <Segmented<import("@/lib/types").Unit>
+          ariaLabel="Default measurement"
+          options={[
+            { value: "count", label: "Count" },
+            { value: "lbs", label: "Lbs" },
+          ]}
+          value={defaultUnit}
+          onChange={setDefaultUnit}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Re-export commonly-used icons so screens don't repeat lucide imports.
 // ---------------------------------------------------------------------------
 
@@ -1375,5 +1647,7 @@ export {
   BarChart2,
   History,
   User,
+  Pencil,
+  Trash2,
 };
 export type { LucideIcon };

@@ -13,6 +13,8 @@ import {
   CategoryPill,
   Check,
   ChevronRight,
+  EditCategoryModal,
+  EditItemModal,
   EmptyState,
   Field,
   Minus,
@@ -20,6 +22,7 @@ import {
   NewItemModal,
   NumberInput,
   PageHeader,
+  Pencil,
   Plus,
   PrimaryButton,
   Subtle,
@@ -115,6 +118,10 @@ export default function AiReviewPage() {
   const [categories, setCategories] = React.useState<Category[]>(
     () => apiClient.getCachedCategories() ?? [],
   );
+  // Catalog items — needed only to populate EditItemModal when the volunteer
+  // opens the pencil on a matched row. We don't show the list anywhere; this
+  // is purely a lookup table.
+  const [catalogItems, setCatalogItems] = React.useState<CatalogItem[]>([]);
   const [categoriesLoading, setCategoriesLoading] = React.useState(true);
 
   const [errorToast, setErrorToast] = React.useState<string | null>(null);
@@ -128,6 +135,13 @@ export default function AiReviewPage() {
   // flow where AI saw some items but the volunteer still needs to log others.
   const [showAddItemTop, setShowAddItemTop] = React.useState(false);
   const [showAddCategoryTop, setShowAddCategoryTop] = React.useState(false);
+  // Save-to-catalog: when set, NewItemModal opens preloaded with the row's
+  // name/category/unit/per-unit value, and on save we merge the new itemId
+  // into that row instead of appending a fresh one.
+  const [saveToCatalogRowId, setSaveToCatalogRowId] = React.useState<string | null>(null);
+  // Edit-existing targets — null = closed.
+  const [editingItem, setEditingItem] = React.useState<CatalogItem | null>(null);
+  const [editingCategory, setEditingCategory] = React.useState<Category | null>(null);
 
   // Hydrate from sessionStorage on mount.
   React.useEffect(() => {
@@ -156,17 +170,19 @@ export default function AiReviewPage() {
     };
   }, [router]);
 
-  // Categories + programs load.
+  // Categories + programs + catalog load.
   React.useEffect(() => {
     const ac = new AbortController();
     setCategoriesLoading(true);
     Promise.all([
       apiClient.getPrograms(ac.signal),
       apiClient.getCategories({ active: true }, ac.signal),
+      apiClient.getCatalog({ active: true }, ac.signal),
     ])
-      .then(([prgs, cats]) => {
+      .then(([prgs, cats, cat]) => {
         setPrograms(prgs);
         setCategories(cats);
+        setCatalogItems(cat);
         apiClient.warmCache({ programs: prgs, categories: cats });
         setCategoriesLoading(false);
       })
@@ -211,6 +227,83 @@ export default function AiReviewPage() {
       handleSelectCategory(newCategoryRowId, cat);
     }
     setNewCategoryRowId(null);
+  };
+
+  // Edit existing catalog item — patch the local lookup table, then refresh
+  // every row already pointing at this catalog row so the visible name and
+  // category stay consistent without a refetch.
+  const handleItemSaved = (updated: CatalogItem) => {
+    setCatalogItems((prev) =>
+      prev.map((i) => (i.id === updated.id ? updated : i)).sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setRows((prev) =>
+      prev.map((r) =>
+        r.itemId === updated.id
+          ? {
+              ...r,
+              name: updated.name,
+              categoryId: updated.categoryId,
+              categoryName: updated.categoryName,
+              programName: updated.programName,
+            }
+          : r,
+      ),
+    );
+  };
+
+  // Edit existing category — patch the local categories list and resnapshot
+  // categoryName/programName on every row that uses it.
+  const handleCategorySaved = (updated: Category) => {
+    apiClient.invalidateCategoriesCache();
+    setCategories((prev) =>
+      prev.map((c) => (c.id === updated.id ? updated : c)).sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setRows((prev) =>
+      prev.map((r) =>
+        r.categoryId === updated.id
+          ? { ...r, categoryName: updated.name, programName: updated.programName }
+          : r,
+      ),
+    );
+    setCatalogItems((prev) =>
+      prev.map((i) =>
+        i.categoryId === updated.id
+          ? { ...i, categoryName: updated.name, programName: updated.programName }
+          : i,
+      ),
+    );
+  };
+
+  // "Save to catalog" on a not_in_catalog row — NewItemModal returns the
+  // freshly-created CatalogItem, and we merge its id/category snapshot into
+  // the originating row so it can save without further intervention.
+  const handleSaveToCatalogCreated = (rowId: string, item: CatalogItem) => {
+    setCatalogItems((prev) => {
+      if (prev.some((i) => i.id === item.id)) return prev;
+      return [...prev, item].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setRows((prev) =>
+      prev.map((r) =>
+        r.rowId === rowId
+          ? {
+              ...r,
+              itemId: item.id,
+              name: item.name,
+              categoryId: item.categoryId,
+              categoryName: item.categoryName,
+              programName: item.programName,
+              unit: item.defaultUnit,
+              matched: true,
+              warning: undefined,
+              initial: {
+                ...r.initial,
+                categoryId: item.categoryId,
+                unit: item.defaultUnit,
+              },
+            }
+          : r,
+      ),
+    );
   };
 
   const handleSaveAll = async () => {
@@ -433,17 +526,26 @@ export default function AiReviewPage() {
           <div className="flex flex-col gap-3">
             {rows.map((r) => {
               if (r.deleted) return null;
+              const catalogItem = r.itemId
+                ? catalogItems.find((c) => c.id === r.itemId) ?? null
+                : null;
               return (
                 <ReviewRowCard
                   key={r.rowId}
                   row={r}
                   categories={categories}
                   categoriesLoading={categoriesLoading}
+                  catalogItem={catalogItem}
                   onChangeCategory={(cat) => handleSelectCategory(r.rowId, cat)}
                   onChangeQuantity={(n) => updateRow(r.rowId, { quantity: n })}
                   onChangeValue={(v) => updateRow(r.rowId, { estimatedValue: v })}
                   onDelete={() => deleteRow(r.rowId)}
                   onOpenNewCategory={() => setNewCategoryRowId(r.rowId)}
+                  onEditItem={() => {
+                    if (catalogItem) setEditingItem(catalogItem);
+                  }}
+                  onEditCategory={(cat) => setEditingCategory(cat)}
+                  onSaveToCatalog={() => setSaveToCatalogRowId(r.rowId)}
                 />
               );
             })}
@@ -534,6 +636,10 @@ export default function AiReviewPage() {
           const isLbs = item.defaultUnit === "lbs";
           const initialQty: number | null = isLbs ? null : 1;
           const initialValue: number | null = isLbs ? null : item.estimatedValuePerUnit;
+          setCatalogItems((prev) => {
+            if (prev.some((i) => i.id === item.id)) return prev;
+            return [...prev, item].sort((a, b) => a.name.localeCompare(b.name));
+          });
           setRows((prev) => [
             ...prev,
             {
@@ -559,6 +665,48 @@ export default function AiReviewPage() {
           setShowAddItemTop(false);
         }}
       />
+
+      {/* Save-to-catalog: a not_in_catalog row can promote itself into the
+          catalog. Prefill comes from the row, the new id merges back in. */}
+      {(() => {
+        const r = saveToCatalogRowId
+          ? rows.find((x) => x.rowId === saveToCatalogRowId) ?? null
+          : null;
+        const perUnit =
+          r && r.quantity && r.quantity > 0 && r.estimatedValue && r.estimatedValue > 0
+            ? +(r.estimatedValue / r.quantity).toFixed(2)
+            : 0;
+        return (
+          <NewItemModal
+            isOpen={saveToCatalogRowId !== null}
+            onClose={() => setSaveToCatalogRowId(null)}
+            categories={categories}
+            defaultCategoryId={r?.categoryId ?? undefined}
+            defaultName={r?.name}
+            defaultUnit={r?.unit}
+            defaultValuePerUnit={perUnit}
+            onCreated={(item) => {
+              if (saveToCatalogRowId) handleSaveToCatalogCreated(saveToCatalogRowId, item);
+              setSaveToCatalogRowId(null);
+            }}
+          />
+        );
+      })()}
+
+      <EditItemModal
+        item={editingItem}
+        categories={categories}
+        isOpen={editingItem !== null}
+        onClose={() => setEditingItem(null)}
+        onSaved={handleItemSaved}
+      />
+
+      <EditCategoryModal
+        category={editingCategory}
+        isOpen={editingCategory !== null}
+        onClose={() => setEditingCategory(null)}
+        onSaved={handleCategorySaved}
+      />
     </>
   );
 }
@@ -569,20 +717,29 @@ function ReviewRowCard({
   row,
   categories,
   categoriesLoading,
+  catalogItem,
   onChangeCategory,
   onChangeQuantity,
   onChangeValue,
   onDelete,
   onOpenNewCategory,
+  onEditItem,
+  onEditCategory,
+  onSaveToCatalog,
 }: {
   row: RowState;
   categories: Category[];
   categoriesLoading: boolean;
+  /** Resolved catalog row, or null when the row isn't matched to a catalog item. */
+  catalogItem: CatalogItem | null;
   onChangeCategory: (cat: Category) => void;
   onChangeQuantity: (n: number | null) => void;
   onChangeValue: (v: number | null) => void;
   onDelete: () => void;
   onOpenNewCategory: () => void;
+  onEditItem: () => void;
+  onEditCategory: (cat: Category) => void;
+  onSaveToCatalog: () => void;
 }) {
   const dirty = isDirty(row);
   const notInCatalog = row.warning === "not_in_catalog";
@@ -617,7 +774,20 @@ function ReviewRowCard({
       {/* Row 1: name + chips + delete */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3 }}>{row.name}</span>
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.3 }}>{row.name}</span>
+            {catalogItem && (
+              <button
+                type="button"
+                onClick={onEditItem}
+                aria-label={`Edit ${catalogItem.name}`}
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-slate-100"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <Pencil size={13} strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <CategoryDropdown
               row={row}
@@ -625,17 +795,35 @@ function ReviewRowCard({
               loading={categoriesLoading}
               onSelect={onChangeCategory}
               onOpenNewCategory={onOpenNewCategory}
+              onEditCategory={onEditCategory}
             />
             {notInCatalog && (
               <CategoryPill tone="amber" icon={AlertTriangle}>
                 Not in catalog
               </CategoryPill>
             )}
+            {notInCatalog && (
+              <button
+                type="button"
+                onClick={onSaveToCatalog}
+                className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 transition"
+                style={{
+                  background: "white",
+                  color: "var(--brand-green-dark)",
+                  border: "1px dashed var(--brand-border)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                <Plus size={12} strokeWidth={1.75} />
+                <span>Save to catalog</span>
+              </button>
+            )}
             {dirty && <CategoryPill tone="amber">Edited</CategoryPill>}
           </div>
           {notInCatalog && (
             <Subtle>
-              Tap the category to change it, then set a value before saving.
+              Tap &quot;Save to catalog&quot; to add this item, or change its category and save the donation as-is.
             </Subtle>
           )}
         </div>
@@ -777,12 +965,14 @@ function CategoryDropdown({
   loading,
   onSelect,
   onOpenNewCategory,
+  onEditCategory,
 }: {
   row: RowState;
   categories: Category[];
   loading: boolean;
   onSelect: (cat: Category) => void;
   onOpenNewCategory: () => void;
+  onEditCategory: (cat: Category) => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -881,22 +1071,38 @@ function CategoryDropdown({
                   {g.cats.map((c) => {
                     const active = c.id === row.categoryId;
                     return (
-                      <button
+                      <div
                         key={c.id}
-                        type="button"
-                        onClick={() => {
-                          onSelect(c);
-                          setOpen(false);
-                        }}
-                        className="flex w-full items-center justify-between px-3 py-2 text-left transition hover:bg-slate-50"
-                        role="option"
-                        aria-selected={active}
+                        className="flex w-full items-center justify-between gap-2 transition hover:bg-slate-50"
                       >
-                        <span style={{ fontSize: 14, fontWeight: active ? 600 : 400 }}>{c.name}</span>
-                        {active && (
-                          <Check size={14} strokeWidth={2} color="var(--brand-green)" />
-                        )}
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelect(c);
+                            setOpen(false);
+                          }}
+                          className="flex flex-1 items-center justify-between px-3 py-2 text-left"
+                          role="option"
+                          aria-selected={active}
+                        >
+                          <span style={{ fontSize: 14, fontWeight: active ? 600 : 400 }}>{c.name}</span>
+                          {active && (
+                            <Check size={14} strokeWidth={2} color="var(--brand-green)" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpen(false);
+                            onEditCategory(c);
+                          }}
+                          aria-label={`Edit ${c.name}`}
+                          className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full transition hover:bg-slate-200"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          <Pencil size={12} strokeWidth={1.75} />
+                        </button>
+                      </div>
                     );
                   })}
                 </div>

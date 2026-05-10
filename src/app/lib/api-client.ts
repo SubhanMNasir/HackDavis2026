@@ -287,6 +287,32 @@ export async function createCatalogItem(body: CreateCatalogItemBody): Promise<Ca
   return json.item;
 }
 
+export interface UpdateCatalogItemBody {
+  name?: string;
+  categoryId?: string;
+  defaultUnit?: Unit;
+  estimatedValuePerUnit?: number;
+  aliases?: string[];
+}
+
+export async function updateCatalogItem(
+  id: string,
+  body: UpdateCatalogItemBody,
+): Promise<CatalogItem> {
+  const json = await fetchJson<{ item: CatalogItem }>(
+    `/api/catalog/${encodeURIComponent(id)}`,
+    { method: "PATCH", body },
+  );
+  return json.item;
+}
+
+export async function archiveCatalogItem(id: string): Promise<{ archived: true; id: string }> {
+  return fetchJson<{ archived: true; id: string }>(
+    `/api/catalog/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Donations (§4.4)
 // ---------------------------------------------------------------------------
@@ -483,6 +509,8 @@ export const apiClient = {
   // Catalog
   getCatalog: (params?: ListCatalogParams, signal?: AbortSignal) => listCatalog(params, signal),
   createCatalogItem: (input: CreateCatalogItemBody) => createCatalogItem(input),
+  updateCatalogItem: (id: string, input: UpdateCatalogItemBody) => updateCatalogItem(id, input),
+  deleteCatalogItem: (id: string) => archiveCatalogItem(id),
 
   // Donations
   createDonations: (donations: CreateDonationItem[]) => createDonations(donations),

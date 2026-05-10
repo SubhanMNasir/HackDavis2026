@@ -121,6 +121,10 @@ export default function ManualEntryPage() {
   const [estimatedValue, setEstimatedValue] = React.useState<string>("");
   const [donatedAt, setDonatedAt] = React.useState<string>(todayPacificIso());
   const [notes, setNotes] = React.useState<string>("");
+  // Optional "Save to catalog for next time" — only meaningful when the
+  // typed name didn't resolve to an existing catalog row. Defaults on so
+  // the catalog grows with each new manual entry; volunteer can uncheck.
+  const [saveToCatalog, setSaveToCatalog] = React.useState<boolean>(true);
 
   React.useEffect(() => {
     const ac = new AbortController();
@@ -216,8 +220,37 @@ export default function ManualEntryPage() {
       return;
     }
     setSubmitting(true);
+    // If the volunteer asked to save this typed item to the catalog, create
+    // it first so the donation row can reference a real itemId. A 409 from
+    // a parallel create is treated as a soft failure: surface the message,
+    // let them uncheck the box and retry rather than silently submitting an
+    // unmatched donation.
+    let resolvedItemId: string | null = itemId;
+    if (saveToCatalog && !itemId) {
+      const qty = Number(quantity);
+      const total = Number(estimatedValue);
+      const perUnit = qty > 0 ? +(total / qty).toFixed(2) : 0;
+      try {
+        const created = await apiClient.createCatalogItem({
+          name: itemName.trim(),
+          categoryId,
+          defaultUnit: unit,
+          estimatedValuePerUnit: perUnit,
+        });
+        resolvedItemId = created.id;
+        setItemId(created.id);
+      } catch (err) {
+        if (err instanceof ApiClientError) {
+          setErrorToast(toastForCode(err.code, err.message));
+        } else {
+          setErrorToast(toastForCode("INTERNAL"));
+        }
+        setSubmitting(false);
+        return;
+      }
+    }
     const payload: CreateDonationItem = {
-      itemId,
+      itemId: resolvedItemId,
       itemName: itemName.trim(),
       categoryId,
       quantity: Number(quantity),
@@ -380,6 +413,26 @@ export default function ManualEntryPage() {
           <Field label="Notes" hint="Optional">
             <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </Field>
+
+          {/* Save-to-catalog toggle: only shown when the typed name doesn't
+              resolve to a catalog item (and there's actually a name to save). */}
+          {itemId === null && itemName.trim().length > 0 && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-[8px] px-2 py-2"
+              style={{ background: "var(--brand-tint)", border: "1px dashed var(--brand-border)" }}
+            >
+              <input
+                type="checkbox"
+                checked={saveToCatalog}
+                onChange={(e) => setSaveToCatalog(e.target.checked)}
+                className="mt-0.5"
+                style={{ accentColor: "var(--brand-green)" }}
+              />
+              <span style={{ fontSize: 13, color: "var(--text-primary)" }}>
+                <strong>Save this item to the catalog</strong> so the next volunteer
+                can pick it from Quick Pick or have the AI recognize it.
+              </span>
+            </label>
+          )}
 
           {/* Mobile sticky save */}
           <div className="md:hidden">
