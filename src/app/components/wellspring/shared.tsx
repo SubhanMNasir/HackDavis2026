@@ -1207,6 +1207,155 @@ export function NewCategoryModal({
   );
 }
 
+export function NewItemModal({
+  categories,
+  defaultCategoryId,
+  isOpen,
+  onClose,
+  onCreated,
+}: {
+  categories: import("@/lib/types").Category[];
+  defaultCategoryId?: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: (item: import("@/lib/types").CatalogItem) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [categoryId, setCategoryId] = React.useState<string>(defaultCategoryId ?? categories[0]?.id ?? "");
+  const [defaultUnit, setDefaultUnit] = React.useState<import("@/lib/types").Unit>("count");
+  const [valueText, setValueText] = React.useState<string>("");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+
+  // Reset state when reopening; preselect defaultCategoryId or first category.
+  // Sync default unit to the picked category so a "Produce" pick prefills lbs.
+  React.useEffect(() => {
+    if (isOpen) {
+      setName("");
+      setValueText("");
+      setFieldError(null);
+      setSubmitting(false);
+      const initialId = defaultCategoryId ?? categories[0]?.id ?? "";
+      setCategoryId(initialId);
+      const initialCat = categories.find((c) => c.id === initialId);
+      setDefaultUnit(initialCat?.defaultUnit ?? "count");
+    }
+  }, [isOpen, defaultCategoryId, categories]);
+
+  // When the user picks a different category, refresh the suggested unit.
+  React.useEffect(() => {
+    const cat = categories.find((c) => c.id === categoryId);
+    if (cat) setDefaultUnit(cat.defaultUnit);
+  }, [categoryId, categories]);
+
+  const handleSubmit = async () => {
+    setFieldError(null);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setFieldError("Item name is required.");
+      return;
+    }
+    if (!categoryId) {
+      setFieldError("Pick a category for this item.");
+      return;
+    }
+    const value = Number(valueText);
+    if (!Number.isFinite(value) || value < 0) {
+      setFieldError("Estimated value per unit must be zero or more.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { apiClient } = await import("../../lib/api-client");
+      const item = await apiClient.createCatalogItem({
+        name: trimmedName,
+        categoryId,
+        defaultUnit,
+        estimatedValuePerUnit: value,
+      });
+      onCreated(item);
+      onClose();
+    } catch (err) {
+      const e = err as { code?: string; message?: string; name?: string };
+      if (e?.name === "ApiClientError" && e.code === "CONFLICT") {
+        setFieldError("An item with this name already exists in that category.");
+      } else if (e?.name === "ApiClientError" && e.code === "VALIDATION_ERROR") {
+        setFieldError(e.message || "Please check the form and try again.");
+      } else {
+        setFieldError(e?.message || "Couldn't create the item. Please try again.");
+      }
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
+      title="New item"
+      footer={
+        <>
+          <SecondaryButton type="button" onClick={onClose} disabled={submitting}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton type="button" fullWidth={false} onClick={handleSubmit} disabled={submitting}>
+            {submitting ? "Creating…" : "Create item"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <Field label="Item name" required error={fieldError ?? undefined}>
+        <TextInput
+          autoFocus
+          placeholder="e.g. Almond Milk"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+
+      <Field label="Category" required>
+        <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+          <option value="" disabled>
+            Pick a category…
+          </option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} · {c.programName}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <Field label="Default measurement">
+        <Segmented<import("@/lib/types").Unit>
+          ariaLabel="Default measurement"
+          options={[
+            { value: "count", label: "Count" },
+            { value: "lbs", label: "Lbs" },
+          ]}
+          value={defaultUnit}
+          onChange={setDefaultUnit}
+        />
+      </Field>
+
+      <Field
+        label="Estimated value per unit"
+        required
+        hint="USD. Used to prefill the dollar field when a volunteer picks this item."
+      >
+        <MoneyInput
+          placeholder="0.00"
+          inputMode="decimal"
+          value={valueText}
+          onChange={(e) => setValueText(e.target.value)}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Re-export commonly-used icons so screens don't repeat lucide imports.
 // ---------------------------------------------------------------------------

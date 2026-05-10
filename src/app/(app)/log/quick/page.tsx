@@ -14,6 +14,7 @@ import {
   H2,
   Minus,
   NewCategoryModal,
+  NewItemModal,
   Plus,
   PrimaryButton,
   PageHeader,
@@ -63,6 +64,7 @@ export default function QuickPickPage() {
   const [selected, setSelected] = React.useState<SelectedRow[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [showNewCategory, setShowNewCategory] = React.useState(false);
+  const [showNewItem, setShowNewItem] = React.useState(false);
 
   React.useEffect(() => {
     const ac = new AbortController();
@@ -204,6 +206,32 @@ export default function QuickPickPage() {
     setActiveCategoryId(cat.id);
   };
 
+  // Push the new item into the local catalog, jump to its category chip so
+  // it's visible in the grid, and add it to the current selection so the
+  // volunteer can keep going.
+  const handleNewItemCreated = (item: CatalogItem) => {
+    setItems((prev) => {
+      if (prev.some((i) => i.id === item.id)) return prev;
+      return [...prev, item].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setActiveCategoryId(item.categoryId);
+    setSelected((prev) => {
+      if (prev.some((r) => r.itemId === item.id)) return prev;
+      return [
+        ...prev,
+        {
+          itemId: item.id,
+          itemName: item.name,
+          categoryId: item.categoryId,
+          unit: item.defaultUnit,
+          quantity: 1,
+          unitPrice: item.estimatedValuePerUnit,
+          estimatedValue: item.estimatedValuePerUnit,
+        },
+      ];
+    });
+  };
+
   const showStickyBar = selected.length > 0;
 
   return (
@@ -269,6 +297,21 @@ export default function QuickPickPage() {
               }}
             >
               + New category
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowNewItem(true)}
+              disabled={categories.length === 0}
+              className="whitespace-nowrap rounded-full px-3 py-1.5 transition disabled:opacity-50"
+              style={{
+                background: "white",
+                color: "var(--brand-green-dark)",
+                border: "1px dashed var(--brand-border)",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              + New item
             </button>
           </div>
         </div>
@@ -345,6 +388,14 @@ export default function QuickPickPage() {
         programs={programs}
         defaultProgramId={undefined}
         onCreated={handleNewCategoryCreated}
+      />
+
+      <NewItemModal
+        isOpen={showNewItem}
+        onClose={() => setShowNewItem(false)}
+        categories={categories}
+        defaultCategoryId={activeCategoryId !== "all" ? activeCategoryId : undefined}
+        onCreated={handleNewItemCreated}
       />
     </>
   );

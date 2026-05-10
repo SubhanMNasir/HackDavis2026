@@ -369,11 +369,6 @@ export default function ProfilePage() {
             <span style={{ fontSize: 15, fontWeight: 500 }}>Account &amp; email</span>
             <Subtle>›</Subtle>
           </button>
-          <div className="h-px" style={{ background: "var(--border-default)" }} />
-          <button className="flex items-center justify-between px-4 py-3 text-left transition hover:bg-slate-50">
-            <span style={{ fontSize: 15, fontWeight: 500 }}>Notifications</span>
-            <Subtle>On ›</Subtle>
-          </button>
         </Card>
 
         <div className="md:col-span-2">

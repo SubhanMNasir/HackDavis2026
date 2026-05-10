@@ -271,6 +271,22 @@ export async function listCatalog(
   return json.items;
 }
 
+export interface CreateCatalogItemBody {
+  name: string;
+  categoryId: string;
+  defaultUnit: Unit;
+  estimatedValuePerUnit: number;
+  aliases?: string[];
+}
+
+export async function createCatalogItem(body: CreateCatalogItemBody): Promise<CatalogItem> {
+  const json = await fetchJson<{ item: CatalogItem }>("/api/catalog", {
+    method: "POST",
+    body,
+  });
+  return json.item;
+}
+
 // ---------------------------------------------------------------------------
 // Donations (§4.4)
 // ---------------------------------------------------------------------------
@@ -466,6 +482,7 @@ export const apiClient = {
 
   // Catalog
   getCatalog: (params?: ListCatalogParams, signal?: AbortSignal) => listCatalog(params, signal),
+  createCatalogItem: (input: CreateCatalogItemBody) => createCatalogItem(input),
 
   // Donations
   createDonations: (donations: CreateDonationItem[]) => createDonations(donations),
