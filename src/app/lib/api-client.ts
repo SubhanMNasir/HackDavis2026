@@ -19,6 +19,37 @@ import type {
 } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
+// In-memory cache (process-local, NOT cross-tab) — used by (app) layout
+// prefetch so dropdowns populate instantly when the user navigates to
+// /log/manual or /log/quick. Writes that mutate categories must call
+// invalidateCategoriesCache() so the next read fetches fresh.
+// ---------------------------------------------------------------------------
+
+interface WarmCache {
+  programs: Program[] | null;
+  categories: Category[] | null;
+}
+
+const warmCache: WarmCache = { programs: null, categories: null };
+
+export function warmCacheSet(parts: { programs?: Program[]; categories?: Category[] }): void {
+  if (parts.programs) warmCache.programs = parts.programs;
+  if (parts.categories) warmCache.categories = parts.categories;
+}
+
+export function getCachedPrograms(): Program[] | null {
+  return warmCache.programs;
+}
+
+export function getCachedCategories(): Category[] | null {
+  return warmCache.categories;
+}
+
+export function invalidateCategoriesCache(): void {
+  warmCache.categories = null;
+}
+
+// ---------------------------------------------------------------------------
 // Error type
 // ---------------------------------------------------------------------------
 
@@ -373,7 +404,8 @@ export interface ListEventsParams {
   from?: string;
   to?: string;
   actor?: string;
-  type?: AuditEventType[];
+  /** Comma-separated string OR array of event-type names. Both are accepted. */
+  type?: AuditEventType[] | string;
   limit?: number;
 }
 
@@ -381,11 +413,17 @@ export async function listEvents(
   params: ListEventsParams = {},
   signal?: AbortSignal,
 ): Promise<AuditEvent[]> {
+  const t =
+    params.type === undefined
+      ? undefined
+      : Array.isArray(params.type)
+        ? params.type.join(",")
+        : params.type;
   const qs = buildQuery({
     from: params.from,
     to: params.to,
     actor: params.actor,
-    type: params.type ? params.type.join(",") : undefined,
+    type: t,
     limit: params.limit,
   });
   const json = await fetchJson<{ events: AuditEvent[] }>(`/api/events${qs}`, { signal });
@@ -408,3 +446,48 @@ export async function getProfileMe(
   const qs = buildQuery({ from: params.from, to: params.to });
   return fetchJson<ProfileResponse>(`/api/profile/me${qs}`, { signal });
 }
+
+// ---------------------------------------------------------------------------
+// Spec-named namespace — Phase 2 screens import this and call methods like
+// apiClient.getPrograms(), apiClient.createDonations(...), etc. Aliases the
+// existing top-level exports so backward-compat is preserved.
+// ---------------------------------------------------------------------------
+
+export const apiClient = {
+  // Programs
+  getPrograms: (signal?: AbortSignal) => listPrograms(signal),
+
+  // Categories
+  getCategories: (params?: ListCategoriesParams, signal?: AbortSignal) =>
+    listCategories(params, signal),
+  createCategory: (input: CreateCategoryBody) => createCategory(input),
+  updateCategory: (id: string, input: UpdateCategoryBody) => updateCategory(id, input),
+  deleteCategory: (id: string) => archiveCategory(id),
+
+  // Catalog
+  getCatalog: (params?: ListCatalogParams, signal?: AbortSignal) => listCatalog(params, signal),
+
+  // Donations
+  createDonations: (donations: CreateDonationItem[]) => createDonations(donations),
+  updateDonation: (id: string, patch: UpdateDonationBody) => updateDonation(id, patch),
+  deleteDonation: (id: string) => deleteDonation(id),
+
+  // Recognition
+  recognizeImage: (body: RecognizeBody) => recognizeImage(body),
+
+  // Reports
+  getReport: (params: ReportsParams, signal?: AbortSignal) => getReport(params, signal),
+  downloadReportsCsv: (params: ReportsCsvParams) => downloadReportsCsv(params),
+
+  // History / events
+  getEvents: (params?: ListEventsParams, signal?: AbortSignal) => listEvents(params, signal),
+
+  // Profile
+  getProfile: (params: ProfileMeParams, signal?: AbortSignal) => getProfileMe(params, signal),
+
+  // In-memory cache controls (process-local; not cross-tab)
+  warmCache: warmCacheSet,
+  invalidateCategoriesCache,
+  getCachedPrograms,
+  getCachedCategories,
+} as const;
