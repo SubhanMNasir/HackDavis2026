@@ -93,6 +93,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = React.useState(true);
   const [errorToast, setErrorToast] = React.useState<string | null>(null);
   const [successToast, setSuccessToast] = React.useState<string | null>(null);
+  const [query, setQuery] = React.useState("");
 
   // Sheet state — for editing one of *your* donation.created events.
   const [sheetEvent, setSheetEvent] = React.useState<AuditEvent | null>(null);
@@ -143,9 +144,20 @@ export default function HistoryPage() {
       });
   }, [categories.length]);
 
+  // Free-text filter — case-insensitive substring on the pre-formatted
+  // summary plus actor/target labels. Cheap, runs on every keystroke.
+  const filteredEvents = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return events;
+    return events.filter((ev) => {
+      const haystack = `${ev.summary} ${ev.actorName} ${ev.targetLabel}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [events, query]);
+
   // ---- Bucketing ----
   const buckets = React.useMemo<Bucket[]>(() => {
-    if (events.length === 0) return [];
+    if (filteredEvents.length === 0) return [];
     const todayKey = pacificDateKey(new Date());
     const yesterdayKey = addDaysToPacificKey(todayKey, -1);
     const labelFor = (key: string, sample: Date) => {
@@ -154,7 +166,7 @@ export default function HistoryPage() {
       return pacificMonthDay(sample);
     };
     const map = new Map<string, Bucket>();
-    for (const ev of events) {
+    for (const ev of filteredEvents) {
       const dt = new Date(ev.createdAt);
       const key = pacificDateKey(dt);
       if (!map.has(key)) {
@@ -164,7 +176,7 @@ export default function HistoryPage() {
     }
     // Sort by key DESC.
     return Array.from(map.values()).sort((a, b) => (a.key < b.key ? 1 : -1));
-  }, [events]);
+  }, [filteredEvents]);
 
   // ---- Sheet helpers ----
   const isOwnDonationCreated = (ev: AuditEvent) =>
@@ -273,7 +285,12 @@ export default function HistoryPage() {
           subtitle="Every donation, category change, and edit."
           right={
             <div className="flex items-center gap-2">
-              <TextInput placeholder="Search activity…" className="w-[280px]" />
+              <TextInput
+                placeholder="Search activity…"
+                className="w-[280px]"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
             </div>
           }
         />
@@ -291,21 +308,38 @@ export default function HistoryPage() {
           </Toast>
         )}
 
+        {/* Mobile-only search (iPad has the input in the page header). */}
+        <div className="md:hidden">
+          <TextInput
+            placeholder="Search activity…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+
         {loading ? (
           <Card className="flex items-center justify-center py-10">
             <Subtle>Loading activity…</Subtle>
           </Card>
         ) : buckets.length === 0 ? (
-          <EmptyState
-            icon={HistoryGlyph}
-            title="No donations yet"
-            body="Log your first one to see it here."
-            action={
-              <PrimaryButton type="button" fullWidth={false} onClick={() => (window.location.href = "/log")}>
-                Log a donation
-              </PrimaryButton>
-            }
-          />
+          query.trim() ? (
+            <EmptyState
+              icon={HistoryGlyph}
+              title="No matches"
+              body={`Nothing in your activity matches “${query.trim()}”.`}
+            />
+          ) : (
+            <EmptyState
+              icon={HistoryGlyph}
+              title="No donations yet"
+              body="Log your first one to see it here."
+              action={
+                <PrimaryButton type="button" fullWidth={false} onClick={() => (window.location.href = "/log")}>
+                  Log a donation
+                </PrimaryButton>
+              }
+            />
+          )
         ) : (
           <div className="flex flex-col gap-4">
             {buckets.map((b) => (

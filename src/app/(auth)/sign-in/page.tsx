@@ -141,6 +141,18 @@ export default function SignInPage() {
           forceRedirectUrl="/log"
           fallbackRedirectUrl="/log"
           appearance={{
+            variables: {
+              colorPrimary: "#2a6b0a",
+              colorText: "#0f172a",
+              colorTextSecondary: "#475569",
+              colorBackground: "#ffffff",
+              colorInputBackground: "#ffffff",
+              colorInputText: "#0f172a",
+              colorDanger: "#dc2626",
+              colorSuccess: "#16a34a",
+              fontFamily: "Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+              borderRadius: "8px",
+            },
             elements: {
               card: "shadow-none border-0 bg-transparent",
               footer: "hidden",
