@@ -231,7 +231,7 @@ export default function ManualEntryPage() {
     try {
       await apiClient.createDonations([payload]);
       setSuccessToast("Donation logged");
-      router.push("/history");
+      router.push("/log");
     } catch (err) {
       if (err instanceof ApiClientError) {
         setErrorToast(toastForCode(err.code, err.message));

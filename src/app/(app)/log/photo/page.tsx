@@ -156,7 +156,6 @@ export default function PhotoPage() {
       if (result.matchedCount === 0) {
         setErrorToast("Could not match item to catalog. Try again or manually select.");
         reset();
-        router.push("/log");
         return;
       }
 

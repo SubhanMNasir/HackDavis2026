@@ -252,7 +252,7 @@ export default function AiReviewPage() {
       sessionStorage.removeItem(STORAGE_KEY);
       const created = res.createdCount;
       setSuccessToast(`Saved ${created} donation${created === 1 ? "" : "s"}`);
-      router.push("/history");
+      router.push("/log");
     } catch (err) {
       setSubmitting(false);
       if (err instanceof ApiClientError) {
@@ -504,6 +504,25 @@ function ReviewRowCard({
   const dirty = isDirty(row);
   const notInCatalog = row.warning === "not_in_catalog";
 
+  // Local input buffers — same pattern as Quick Pick. Lets the user erase a
+  // field to empty without snapping back to "0", and the refs prevent the
+  // resync effect from clobbering the user's in-progress text after we emit.
+  const [qtyText, setQtyText] = React.useState<string>(String(row.quantity));
+  const [valueText, setValueText] = React.useState<string>(String(row.estimatedValue));
+  const lastEmittedQty = React.useRef<number>(row.quantity);
+  const lastEmittedValue = React.useRef<number>(row.estimatedValue);
+
+  React.useEffect(() => {
+    if (row.quantity !== lastEmittedQty.current) {
+      setQtyText(String(row.quantity));
+      lastEmittedQty.current = row.quantity;
+    }
+    if (row.estimatedValue !== lastEmittedValue.current) {
+      setValueText(String(row.estimatedValue));
+      lastEmittedValue.current = row.estimatedValue;
+    }
+  }, [row.quantity, row.estimatedValue]);
+
   return (
     <Card className="flex flex-col gap-3">
       {/* Row 1: name + chips + delete */}
@@ -548,8 +567,10 @@ function ReviewRowCard({
               type="button"
               onClick={() => {
                 const step = row.unit === "count" ? 1 : 0.1;
-                const next = +(row.quantity - step).toFixed(1);
-                onChangeQuantity(Math.max(step, next));
+                const next = Math.max(step, +(row.quantity - step).toFixed(2));
+                setQtyText(String(next));
+                lastEmittedQty.current = next;
+                onChangeQuantity(next);
               }}
               className="px-3 py-2"
               aria-label="Decrease quantity"
@@ -558,21 +579,32 @@ function ReviewRowCard({
             </button>
             <input
               type="number"
+              inputMode={row.unit === "count" ? "numeric" : "decimal"}
               min={0}
               step={row.unit === "count" ? 1 : 0.1}
-              value={row.quantity}
+              value={qtyText}
               onChange={(e) => {
-                const n = Number(e.target.value);
-                onChangeQuantity(Number.isFinite(n) ? n : 0);
+                const text = e.target.value;
+                setQtyText(text);
+                if (text === "") return;
+                const n = Number(text);
+                if (Number.isFinite(n) && n >= 0) {
+                  lastEmittedQty.current = n;
+                  onChangeQuantity(n);
+                }
               }}
               className="w-16 px-1 py-2 text-center tabular-nums outline-none"
               style={{ fontSize: 14, fontWeight: 500 }}
+              aria-label="Quantity"
             />
             <button
               type="button"
               onClick={() => {
                 const step = row.unit === "count" ? 1 : 0.1;
-                onChangeQuantity(+(row.quantity + step).toFixed(1));
+                const next = +(row.quantity + step).toFixed(2);
+                setQtyText(String(next));
+                lastEmittedQty.current = next;
+                onChangeQuantity(next);
               }}
               className="px-3 py-2"
               aria-label="Increase quantity"
@@ -609,15 +641,27 @@ function ReviewRowCard({
               $
             </span>
             <NumberInput
+              inputMode="decimal"
               min={0}
               step={0.01}
-              value={row.estimatedValue}
+              value={valueText}
               onChange={(e) => {
-                const n = Number(e.target.value);
-                onChangeValue(Number.isFinite(n) ? n : 0);
+                const text = e.target.value;
+                setValueText(text);
+                if (text === "") {
+                  lastEmittedValue.current = 0;
+                  onChangeValue(0);
+                  return;
+                }
+                const n = Number(text);
+                if (Number.isFinite(n) && n >= 0) {
+                  lastEmittedValue.current = n;
+                  onChangeValue(n);
+                }
               }}
               className="pl-7"
               style={{ width: 110 }}
+              aria-label="Estimated value"
             />
           </div>
         </Field>

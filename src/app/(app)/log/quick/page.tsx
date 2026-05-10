@@ -187,7 +187,7 @@ export default function QuickPickPage() {
     try {
       await apiClient.createDonations(payload);
       setSuccessToast(`Logged ${selected.length} item${selected.length === 1 ? "" : "s"}`);
-      router.push("/history");
+      router.push("/log");
     } catch (err) {
       if (err instanceof ApiClientError) setErrorToast(toastForCode(err.code, err.message));
       else setErrorToast(toastForCode("INTERNAL"));
@@ -365,6 +365,36 @@ function ItemTile({
   onChangeQuantity: (next: number) => void;
   onChangeValue: (next: number) => void;
 }) {
+  // Local string buffers so the user can erase to empty without us snapping back to "0".
+  // Refs track the last value we emitted upward so the resync effect doesn't loop back
+  // and overwrite the user's in-progress text with the same value they just typed.
+  const [qtyText, setQtyText] = React.useState<string>(
+    selectedRow ? String(selectedRow.quantity) : "",
+  );
+  const [valueText, setValueText] = React.useState<string>(
+    selectedRow ? String(selectedRow.estimatedValue) : "",
+  );
+  const lastEmittedQty = React.useRef<number | null>(selectedRow?.quantity ?? null);
+  const lastEmittedValue = React.useRef<number | null>(selectedRow?.estimatedValue ?? null);
+
+  React.useEffect(() => {
+    if (!selectedRow) {
+      lastEmittedQty.current = null;
+      lastEmittedValue.current = null;
+      setQtyText("");
+      setValueText("");
+      return;
+    }
+    if (selectedRow.quantity !== lastEmittedQty.current) {
+      setQtyText(String(selectedRow.quantity));
+      lastEmittedQty.current = selectedRow.quantity;
+    }
+    if (selectedRow.estimatedValue !== lastEmittedValue.current) {
+      setValueText(String(selectedRow.estimatedValue));
+      lastEmittedValue.current = selectedRow.estimatedValue;
+    }
+  }, [selectedRow]);
+
   if (!selectedRow) {
     return (
       <button
@@ -396,8 +426,18 @@ function ItemTile({
   }
 
   const step = selectedRow.unit === "count" ? 1 : 0.1;
-  const dec = () => onChangeQuantity(Math.max(step, +(selectedRow.quantity - step).toFixed(1)));
-  const inc = () => onChangeQuantity(+(selectedRow.quantity + step).toFixed(1));
+  const dec = () => {
+    const next = Math.max(step, +(selectedRow.quantity - step).toFixed(2));
+    setQtyText(String(next));
+    lastEmittedQty.current = next;
+    onChangeQuantity(next);
+  };
+  const inc = () => {
+    const next = +(selectedRow.quantity + step).toFixed(2);
+    setQtyText(String(next));
+    lastEmittedQty.current = next;
+    onChangeQuantity(next);
+  };
 
   return (
     <div
@@ -430,9 +470,26 @@ function ItemTile({
           <button onClick={dec} className="px-2 py-1" aria-label="Decrease">
             <Minus size={14} strokeWidth={1.5} color="var(--text-secondary)" />
           </button>
-          <span className="px-2 tabular-nums" style={{ fontSize: 13, fontWeight: 500 }}>
-            {selectedRow.quantity}
-          </span>
+          <input
+            type="number"
+            inputMode={selectedRow.unit === "count" ? "numeric" : "decimal"}
+            step={step}
+            min={0}
+            value={qtyText}
+            onChange={(e) => {
+              const text = e.target.value;
+              setQtyText(text);
+              if (text === "") return;
+              const n = Number(text);
+              if (Number.isFinite(n) && n >= 0) {
+                lastEmittedQty.current = n;
+                onChangeQuantity(n);
+              }
+            }}
+            className="w-14 px-1 py-1 tabular-nums text-center outline-none"
+            style={{ fontSize: 13, fontWeight: 500, background: "transparent", border: "none" }}
+            aria-label="Quantity"
+          />
           <button onClick={inc} className="px-2 py-1" aria-label="Increase">
             <Plus size={14} strokeWidth={1.5} color="var(--text-secondary)" />
           </button>
@@ -443,12 +500,23 @@ function ItemTile({
         <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>$</span>
         <input
           type="number"
+          inputMode="decimal"
           step="0.01"
           min={0}
-          value={selectedRow.estimatedValue}
+          value={valueText}
           onChange={(e) => {
-            const n = Number(e.target.value);
-            onChangeValue(Number.isFinite(n) ? n : 0);
+            const text = e.target.value;
+            setValueText(text);
+            if (text === "") {
+              lastEmittedValue.current = 0;
+              onChangeValue(0);
+              return;
+            }
+            const n = Number(text);
+            if (Number.isFinite(n) && n >= 0) {
+              lastEmittedValue.current = n;
+              onChangeValue(n);
+            }
           }}
           className="w-full rounded-[6px] px-2 py-1 tabular-nums outline-none transition focus:border-[var(--brand-green)]"
           style={{
@@ -456,6 +524,7 @@ function ItemTile({
             fontSize: 13,
             fontWeight: 500,
           }}
+          aria-label="Estimated value"
         />
       </div>
     </div>
