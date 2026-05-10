@@ -15,8 +15,10 @@ export type AuditEventType =
   | "donation.deleted"
   | "category.created"
   | "category.renamed"
+  | "category.updated"
   | "category.archived"
   | "item.created"
+  | "item.updated"
   | "item.archived";
 
 // ---- Programs (4 seeded, never user-creatable) ----

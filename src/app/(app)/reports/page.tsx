@@ -20,8 +20,8 @@ import { apiClient, ApiClientError } from "../../lib/api-client";
 import { toastForCode } from "../../lib/error-toast-map";
 import { APP_TZ } from "@/lib/timezone";
 
-type Preset = "This month" | "Last month" | "Q2" | "YTD" | "Custom";
-const PRESETS: ReadonlyArray<Preset> = ["This month", "Last month", "Q2", "YTD", "Custom"];
+type Preset = "This month" | "Last month" | "YTD" | "Custom";
+const PRESETS: ReadonlyArray<Preset> = ["This month", "Last month", "YTD", "Custom"];
 
 // ---------- Pacific date helpers (local; do not extend lib/timezone.ts here) ----------
 
@@ -90,12 +90,6 @@ function rangeForPreset(preset: Preset, customFrom: string, customTo: string): {
       return {
         from: pacificWallToUtcIso(lmYear, lmMonth, 1, 0, 0, 0),
         to: pacificWallToUtcIso(lmYear, lmMonth, last, 23, 59, 59),
-      };
-    }
-    case "Q2": {
-      return {
-        from: pacificWallToUtcIso(year, 4, 1, 0, 0, 0),
-        to: pacificWallToUtcIso(year, 6, 30, 23, 59, 59),
       };
     }
     case "YTD": {

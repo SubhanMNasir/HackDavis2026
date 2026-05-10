@@ -15,8 +15,10 @@ const AUDIT_EVENT_TYPES: AuditEventType[] = [
   "donation.deleted",
   "category.created",
   "category.renamed",
+  "category.updated",
   "category.archived",
   "item.created",
+  "item.updated",
   "item.archived",
 ];
 

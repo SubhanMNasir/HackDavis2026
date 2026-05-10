@@ -5,9 +5,8 @@
 // categoryId changes the denormalized categoryName + programName are
 // re-snapshot from the target category. Duplicate (categoryId, name)
 // among active rows returns 409 (case-insensitive, per the model's
-// compound unique index). No audit event is emitted — CONTRACTS §3 only
-// enumerates item.{created,archived}, so we follow the same fall-through
-// the categories/[id] PATCH route uses for unit-only edits.
+// compound unique index). Emits an `item.updated` audit event summarizing
+// which fields changed so the edit shows up in History.
 //
 // DELETE soft-archives by setting active: false and emits item.archived.
 // Existing donations keep their snapshot fields so they continue to render.
@@ -54,7 +53,7 @@ interface RouteCtx {
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
   try {
-    await requireAuth();
+    const auth = await requireAuth();
     await connectMongo();
     const { id } = await ctx.params;
     if (!Types.ObjectId.isValid(id)) {
@@ -81,6 +80,14 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     if (!item || !item.active) {
       throw new ApiError(404, "NOT_FOUND", "Item not found");
     }
+
+    const prev = {
+      name: item.name,
+      categoryName: item.categoryName,
+      defaultUnit: item.defaultUnit,
+      estimatedValuePerUnit: item.estimatedValuePerUnit,
+      aliasesCount: item.aliases?.length ?? 0,
+    };
 
     if (body.categoryId !== undefined && body.categoryId !== String(item.categoryId)) {
       const cat = await Category.findById(body.categoryId);
@@ -113,6 +120,35 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
         );
       }
       throw e;
+    }
+
+    const changes: string[] = [];
+    if (item.name !== prev.name) changes.push(`renamed ${prev.name} -> ${item.name}`);
+    if (item.categoryName !== prev.categoryName) {
+      changes.push(`moved to ${item.categoryName}`);
+    }
+    if (item.defaultUnit !== prev.defaultUnit) {
+      changes.push(`unit ${prev.defaultUnit} -> ${item.defaultUnit}`);
+    }
+    if (item.estimatedValuePerUnit !== prev.estimatedValuePerUnit) {
+      changes.push(
+        `price $${prev.estimatedValuePerUnit.toFixed(2)} -> $${item.estimatedValuePerUnit.toFixed(2)}`,
+      );
+    }
+    if ((item.aliases?.length ?? 0) !== prev.aliasesCount) {
+      changes.push(`aliases updated`);
+    }
+
+    if (changes.length > 0) {
+      const targetLabel =
+        item.name !== prev.name ? `${prev.name} -> ${item.name}` : item.name;
+      const summary = `${auth.displayName} updated ${prev.name} (${changes.join(", ")})`;
+      await recordEvent(
+        "item.updated",
+        { actorId: auth.userId, fullName: auth.fullName, displayName: auth.displayName },
+        { id: String(item._id), label: targetLabel },
+        summary,
+      );
     }
 
     return NextResponse.json({ item: item.toJSON() as unknown as WireCatalogItem });

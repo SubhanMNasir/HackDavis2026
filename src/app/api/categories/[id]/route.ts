@@ -97,9 +97,13 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
         summary,
       );
     } else if (body.defaultUnit !== undefined && body.defaultUnit !== prevUnit) {
-      // Unit-only edit. CONTRACTS §3 only enumerates category.{created,renamed,archived}
-      // for our domain — fall through and skip the audit event rather than
-      // invent a new event type.
+      const summary = `${auth.displayName} updated category ${category.name} (unit ${prevUnit} -> ${category.defaultUnit})`;
+      await recordEvent(
+        "category.updated",
+        { actorId: auth.userId, fullName: auth.fullName, displayName: auth.displayName },
+        { id: String(category._id), label: category.name },
+        summary,
+      );
     }
 
     return NextResponse.json({ category: category.toJSON() as unknown as WireCategory });
