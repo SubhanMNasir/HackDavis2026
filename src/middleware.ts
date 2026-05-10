@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { jsonError } from "./lib/api/errors";
 
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
@@ -6,10 +7,18 @@ const isPublicRoute = createRouteMatcher([
   "/api/health",
 ]);
 
+const isApiRoute = createRouteMatcher(["/api/(.*)"]);
+
 export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    await auth.protect();
+  if (isPublicRoute(req)) return;
+
+  const { userId, redirectToSignIn } = await auth();
+  if (userId) return;
+
+  if (isApiRoute(req)) {
+    return jsonError(401, "UNAUTHENTICATED", "Authentication required");
   }
+  return redirectToSignIn();
 });
 
 export const config = {
