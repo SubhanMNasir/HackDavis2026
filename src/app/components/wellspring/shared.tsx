@@ -1077,6 +1077,137 @@ export function MethodCard({
 }
 
 // ---------------------------------------------------------------------------
+// New Category Modal — POST /api/categories then bubbles the new Category up.
+// Used from Manual Entry, Quick Pick, and (Phase 3) AI Review.
+// Per wellspring-build-brief.md §Screen 4b — must use Count/Lbs segmented
+// control (the produce tip below).
+// ---------------------------------------------------------------------------
+
+export function NewCategoryModal({
+  programs,
+  defaultProgramId,
+  isOpen,
+  onClose,
+  onCreated,
+}: {
+  programs: import("@/lib/types").Program[];
+  defaultProgramId?: string;
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: (category: import("@/lib/types").Category) => void;
+}) {
+  const [name, setName] = React.useState("");
+  const [programId, setProgramId] = React.useState<string>(defaultProgramId ?? programs[0]?.id ?? "");
+  const [defaultUnit, setDefaultUnit] = React.useState<import("@/lib/types").Unit>("count");
+  const [submitting, setSubmitting] = React.useState(false);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
+
+  // Reset state when reopening; preselect defaultProgramId or first program.
+  React.useEffect(() => {
+    if (isOpen) {
+      setName("");
+      setProgramId(defaultProgramId ?? programs[0]?.id ?? "");
+      setDefaultUnit("count");
+      setFieldError(null);
+      setSubmitting(false);
+    }
+  }, [isOpen, defaultProgramId, programs]);
+
+  const handleSubmit = async () => {
+    setFieldError(null);
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setFieldError("Category name is required.");
+      return;
+    }
+    if (!programId) {
+      setFieldError("Pick a program for this category.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { apiClient } = await import("../../lib/api-client");
+      const cat = await apiClient.createCategory({ name: trimmed, programId, defaultUnit });
+      apiClient.invalidateCategoriesCache();
+      onCreated(cat);
+      onClose();
+    } catch (err) {
+      const e = err as { code?: string; message?: string; name?: string };
+      if (e?.name === "ApiClientError" && e.code === "CONFLICT") {
+        setFieldError("A category with this name already exists in that program.");
+      } else if (e?.name === "ApiClientError" && e.code === "VALIDATION_ERROR") {
+        setFieldError(e.message || "Please check the form and try again.");
+      } else {
+        setFieldError(e?.message || "Couldn't create the category. Please try again.");
+      }
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      open={isOpen}
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
+      title="New category"
+      footer={
+        <>
+          <SecondaryButton type="button" onClick={onClose} disabled={submitting}>
+            Cancel
+          </SecondaryButton>
+          <PrimaryButton type="button" fullWidth={false} onClick={handleSubmit} disabled={submitting}>
+            {submitting ? "Creating…" : "Create category"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <Field label="Category name" required error={fieldError ?? undefined}>
+        <TextInput
+          autoFocus
+          placeholder="e.g. Toothbrushes"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </Field>
+
+      <Field label="Program" required>
+        <Select value={programId} onChange={(e) => setProgramId(e.target.value)}>
+          <option value="" disabled>
+            Pick a program…
+          </option>
+          {programs.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      <Field
+        label="Default measurement"
+        hint={
+          <>
+            Most produce is measured in <strong>lbs</strong>. Use <strong>count</strong> for packaged
+            items like diapers or toothbrushes.
+          </>
+        }
+      >
+        <Segmented<import("@/lib/types").Unit>
+          ariaLabel="Default measurement"
+          options={[
+            { value: "count", label: "Count" },
+            { value: "lbs", label: "Lbs" },
+          ]}
+          value={defaultUnit}
+          onChange={setDefaultUnit}
+        />
+      </Field>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Re-export commonly-used icons so screens don't repeat lucide imports.
 // ---------------------------------------------------------------------------
 
