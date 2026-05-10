@@ -189,11 +189,14 @@ export default function PhotoPage() {
         <PageHeader title="Photo entry" subtitle="Snap a pile and we'll fill in the items." />
       </div>
 
+      {/* No `capture` attribute: mobile browsers show the native chooser
+          (Take Photo OR Photo Library), desktop falls back to the file
+          picker. Forcing capture="environment" here was hiding the
+          gallery option on iOS/Android. */}
       <input
         ref={inputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
-        capture="environment"
         className="hidden"
         onChange={handleChange}
       />
@@ -230,8 +233,8 @@ export default function PhotoPage() {
           >
             <Camera size={28} strokeWidth={1.5} />
           </span>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>Tap to take a photo</div>
-          <Subtle>or choose from gallery</Subtle>
+          <div style={{ fontSize: 16, fontWeight: 600 }}>Tap to add a photo</div>
+          <Subtle>Take a new photo or choose from your gallery.</Subtle>
           <Subtle>JPEG / PNG / WebP / HEIC up to 15 MB.</Subtle>
         </button>
 
@@ -262,7 +265,7 @@ export default function PhotoPage() {
       {/* Sticky CTA */}
       <div className="sticky bottom-16 z-20 px-4 pb-4 md:static md:px-6 md:pb-6">
         <PrimaryButton type="button" onClick={openPicker} disabled={busy}>
-          {busy ? busyLabel : "Open Camera"}
+          {busy ? busyLabel : "Add Photo"}
         </PrimaryButton>
       </div>
 
