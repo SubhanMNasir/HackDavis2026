@@ -29,7 +29,7 @@ Non-goals: photo persistence (Vercel Blob), multi-tenancy, websockets, item-leve
 |---|---|---|
 | `src/imports/CONTRACTS.md` | `src/app/**/*` (except `src/app/api/**`) | `src/app/api/**` |
 | `src/imports/wellspring-build-brief.md` | `src/app/components/**` | `src/lib/db/**` |
-| `plans/PLAN.md` | `src/app/(routes)/**` page files | `src/lib/ai/**` |
+| `src/imports/PLAN.md` | `src/app/(routes)/**` page files | `src/lib/ai/**` |
 | `src/lib/types.ts` (canonical, mirrors `CONTRACTS.md §3`) | `src/app/styles/**` | `src/lib/auth/**` |
 | `src/lib/timezone.ts` (`TZ = "America/Los_Angeles"` constant only) | `src/app/components/wellspring/**` | `src/lib/seed/**` |
 | `package.json` (dependency adds; don't reorder existing entries) | Any new `*.tsx` under `src/app/components/` | Any `route.ts` under `src/app/api/` |

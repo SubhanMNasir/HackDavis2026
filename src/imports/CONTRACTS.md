@@ -98,7 +98,8 @@ export interface CatalogItem {
 export interface Donation {
   id: string;                       // ObjectId hex
   loggedBy: string;                 // Clerk user ID
-  loggedByName: string;             // denormalized
+  // CHANGED 2026-05-09: full name from Clerk; UI abbreviates via lib/format-name.ts
+  loggedByName: string;             // denormalized — full name (e.g. "Jessica Martinez")
   itemId: string | null;            // null when item is not in catalog (manual)
   itemName: string;                 // always present (denormalized)
   categoryId: string;
@@ -159,9 +160,10 @@ export interface AuditEvent {
   id: string;                       // ObjectId hex
   type: AuditEventType;
   actorId: string;                  // Clerk userId
-  actorName: string;                // denormalized
+  actorName: string;                // denormalized — full name; UI abbreviates via lib/format-name.ts
   targetId: string;                 // donation/category/item id
   targetLabel: string;              // human label, e.g. "Size 4 Diapers" or "Diapers → Adult Diapers"
+  // CHANGED 2026-05-09: backend pre-formats summary with abbreviated actor name via formatDisplayName()
   summary: string;                  // pre-formatted display string ("Jessica M. logged 24 Size 4 Diapers")
   createdAt: string;                // ISO
 }
@@ -376,6 +378,8 @@ Edit an existing donation. Only the original logger may PATCH their own entry.
 
 Emits a `donation.updated` event whose `summary` includes a brief diff (e.g. `"qty 12 → 24"`).
 
+> **CHANGED 2026-05-09:** if `categoryId` is changed, backend re-snapshots `categoryName` and `programName` from the new category. The audit `summary` names both old and new category (e.g. `"category Diapers → Adult Diapers"`).
+
 #### `DELETE /api/donations/:id`
 
 **Soft delete.** Sets `deleted: true`. Row is hidden from `GET /api/donations` and from Reports aggregations (which filter `deleted: { $ne: true }`). Audit log keeps referencing the row.
@@ -408,6 +412,8 @@ Send a photo, get back a list of suggested items already matched against the cat
 ```
 
 The `data:image/...;base64,` prefix is tolerated — backend strips it if present.
+
+> **CHANGED 2026-05-09:** iPhone HEIC must be converted to JPEG client-side before posting (frontend uses `heic2any` + canvas downscale). Backend rejects `image/heic` with `400 INVALID_IMAGE`.
 
 **Response 200:**
 ```ts
@@ -521,6 +527,7 @@ The Reports screen has these preset chips. Frontend computes `from` and `to` and
 | Q2 | Apr 1, 00:00:00 of current year | Jun 30, 23:59:59 of current year |
 | YTD | Jan 1, 00:00:00 of current year | now |
 | Custom | user-picked | user-picked |
+| All time *(Profile only)* | `1970-01-01T00:00:00.000Z` | now | <!-- CHANGED 2026-05-09 -->
 
 The History screen's "Today" / "Yesterday" / older buckets are also computed in Pacific.
 
