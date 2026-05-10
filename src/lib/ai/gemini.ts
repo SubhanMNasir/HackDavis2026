@@ -229,14 +229,23 @@ export async function recognizeItemsFromImage(
       };
     }
 
-    const unmatchedUnit: Unit = aiUnit ?? "count";
+    // No catalog item match, but the AI's `category` is enum-constrained to
+    // active category names — so resolve it back to a real categoryId. That
+    // way the volunteer arrives at Review with a sane default category they
+    // can keep, change, or "+ New category" out of, and the row can save
+    // (categoryId is required by createDonations).
+    const aiCategoryLower = aiCategory.trim().toLowerCase();
+    const matchedCategory = aiCategoryLower
+      ? args.categories.find((c) => c.name.toLowerCase() === aiCategoryLower)
+      : undefined;
+    const unmatchedUnit: Unit = aiUnit ?? matchedCategory?.defaultUnit ?? "count";
     const unmatchedIsLbs = unmatchedUnit === "lbs";
     return {
       itemId: null,
       name: aiName || "Unknown item",
-      categoryId: null,
-      categoryName: aiCategory,
-      programName: null,
+      categoryId: matchedCategory?.id ?? null,
+      categoryName: matchedCategory?.name ?? aiCategory,
+      programName: matchedCategory?.programName ?? null,
       suggestedQuantity: unmatchedIsLbs ? null : aiQty,
       unit: unmatchedUnit,
       estimatedValue: unmatchedIsLbs ? null : aiValue,

@@ -627,12 +627,17 @@ function ReviewRowCard({
               onOpenNewCategory={onOpenNewCategory}
             />
             {notInCatalog && (
-              <CategoryPill tone="red" icon={AlertTriangle}>
+              <CategoryPill tone="amber" icon={AlertTriangle}>
                 Not in catalog
               </CategoryPill>
             )}
             {dirty && <CategoryPill tone="amber">Edited</CategoryPill>}
           </div>
+          {notInCatalog && (
+            <Subtle>
+              Tap the category to change it, then set a value before saving.
+            </Subtle>
+          )}
         </div>
         <button
           type="button"
