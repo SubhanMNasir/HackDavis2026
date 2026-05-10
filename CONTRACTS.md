@@ -22,7 +22,7 @@ When this file conflicts with `PLAN.md`, **this file wins** for the wire format.
 | **Content-Type** | All POST/PUT/PATCH bodies are `application/json` unless explicitly noted (image upload uses base64 inside JSON, not multipart). |
 | **CSV** | `text/csv; charset=utf-8` with `Content-Disposition: attachment; filename="..."`. |
 | **Empty results** | Always return `[]` or the canonical shape with zeroes — never `null` or `undefined` for collections/aggregates. |
-| **Quantity precision** | Integer for `unit: "count"`. Up to 1 decimal place for `unit: "lbs"` or `"oz"`. |
+| **Quantity precision** | Integer for `unit: "count"`. Up to 1 decimal place for `unit: "lbs"`. |
 | **Tiebreakers** | When sorting Reports rows by `totalValue` and two rows tie, fall back to alphabetical `itemName` ascending. |
 
 ---
@@ -51,7 +51,8 @@ These types are **canonical**. Both sides should mirror them (a shared `lib/type
 
 ```ts
 // ---- Enums ----
-export type Unit = "count" | "lbs" | "oz";
+// CHANGED 2026-05-10: removed "oz" — every category is now exactly count OR lbs.
+export type Unit = "count" | "lbs";
 
 export type DonationSource = "photo_ai" | "quick_pick" | "manual" | "barcode";
 
@@ -616,6 +617,56 @@ Full schema details (Mongoose models, indexes, aggregation pipeline) live in `PL
 - **`events`** — append-only audit log. Every donation / category / item write emits one row.
 
 The wire format (`CatalogItem`, `Donation`, `Category`, `AuditEvent`, etc.) is what the frontend sees — backend is responsible for projecting Mongoose docs into these shapes (e.g. `_id` → `id`, dates → ISO strings).
+
+---
+
+### 4.9 Profile
+
+#### `GET /api/profile/me`
+
+Returns aggregated stats for the signed-in volunteer. Used by the mobile + iPad Profile screens.
+
+**Query params:**
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `from` | ISO date | yes | Inclusive start of the selected time-range chip. |
+| `to` | ISO date | yes | Inclusive end. |
+
+**Response 200:**
+```ts
+{
+  user: {
+    id: string;                       // Clerk userId
+    name: string;                     // "Jessica M."
+    email: string;
+    initials: string;                 // "JM"
+    joinedAt: string;                 // ISO; first donation OR user.createdAt
+  };
+  range: { from: string; to: string };
+  stats: {
+    entryCount: number;               // donations logged by this user in range
+    totalValue: number;               // USD
+  };
+  topCategories: Array<{
+    categoryName: string;
+    totalValue: number;
+    pct: number;                      // 0–100, rounded to whole number; sum may be 99–101
+  }>;                                 // sorted desc by totalValue, capped to top 5; 6th+ collapsed into "Other"
+  recentEntries: Array<{
+    donationId: string;
+    itemName: string;
+    quantity: number;
+    unit: Unit;
+    estimatedValue: number;
+    donatedAt: string;                // ISO
+  }>;                                 // last 4 by donatedAt DESC, regardless of range
+}
+```
+
+**Backend notes:**
+- Filters `deleted: { $ne: true }` and `loggedBy === userId` for stats + topCategories.
+- `recentEntries` ignores the `from`/`to` window — it's a "what have I been doing" feed for the right column on iPad.
+- Empty range still returns `stats: { entryCount: 0, totalValue: 0 }` and `topCategories: []`.
 
 ---
 

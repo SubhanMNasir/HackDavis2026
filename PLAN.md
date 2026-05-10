@@ -1,436 +1,197 @@
-# Wellspring Donation Logging System — 24h Hackathon Plan
+# Wellspring — Implementation Plan (parallel agents)
 
-## Context
+This plan exists to let a **frontend agent** and a **backend agent** build the Wellspring Donation Logger **at the same time, in the same repo, without merge conflicts**. Read this *and* `src/imports/CONTRACTS.md` before writing code. The brief in `src/imports/wellspring-build-brief.md` covers visual + screen design.
 
-Wellspring is a small nonprofit that needs to replace a paper-based donation log. Their pain points are illegible handwriting, slow page-flipping, and no way to pull totals on demand. Per Jessica (the client), the real requirements are:
-
-- **Track incoming donations only** — no inventory or outgoing tracking
-- **Estimated dollar values matter** for tax-purpose reporting
-- **Most items have no barcode** — meal program food especially. Produce/food is logged by **weight (lbs)**, hygiene/diapers by **count**
-- **Multiple volunteers logging simultaneously** during giveaway days
-- They have a **fixed list of commonly-accepted items** that should seed the catalog
-- **Add / rename / soft-archive donation categories at runtime** — Jessica's email asks for this (e.g. spinning up a "Dog Leashes" category on the spot); inline from AI Review, no separate admin screen
-- **Audit-log every write** so any volunteer can see who logged / edited / archived what — replaces the original "Recent" tab with a "History" team feed
-
-**Constraints baked into this plan:**
-- 24-hour build window
-- 4 people, new to React/Next.js + Node + MongoDB
-- Mobile-first (phones + iPad), wifi assumed (no offline)
-- MongoDB Atlas required (prize track)
-- **Gemini API** for vision (also a prize track)
-- Auth: Clerk (email + password with reset)
-- Primary input: **AI photo recognition + quick-pick from seeded catalog**, manual fallback
-- Reports: **dashboard + CSV export** (no scheduled emails for MVP)
-- **Timezone**: all date bucketing is in `America/Los_Angeles` (Wellspring's TZ); wire format stays UTC ISO
-
-**Goal:** Ship a polished, mobile-friendly MVP that demos cleanly: a volunteer signs in, snaps a photo of a pile of donations, AI fills the form, they confirm, and a report tab shows totals + tax values for any date range.
+> **Hierarchy of truth** (when docs disagree):
+> 1. `CONTRACTS.md` — wire format, types, endpoints. Either agent may edit, but only via the change protocol in §10 of that file.
+> 2. `wellspring-build-brief.md` — visual design + screen behavior. **Frontend-owned.**
+> 3. `PLAN.md` (this file) — sequencing, file ownership, build steps. **Coordinator-owned.** Either agent may *propose* edits but must flag them.
 
 ---
 
-## Tech Stack
+## 0. Goal
 
-Boring, well-documented choices. The team is learning the stack — every "we'll figure it out" is a 4-hour hole at 3am.
+Ship an MVP donation-logging app:
+- Mobile + iPad volunteer app: photo-AI flow, quick pick, manual entry, reports, history, profile.
+- Next.js App Router (frontend pages + backend `/api/**` routes in the same repo).
+- Clerk auth, MongoDB persistence, Gemini (`gemini-2.5-flash`) image recognition.
+- Soft delete everywhere, audit log on every write.
 
-| Layer | Choice | Why |
+Non-goals: photo persistence (Vercel Blob), multi-tenancy, websockets, item-level admin UI. See `CONTRACTS.md §9`.
+
+---
+
+## 1. File ownership (the conflict-prevention table)
+
+**The rule:** an agent only writes to files in their column. Files in the **shared** column require a coordination ping (see §6).
+
+| Shared (coordinated) | Frontend-only | Backend-only |
 |---|---|---|
-| Framework | **Next.js 15 (App Router)** | One repo, one deploy. File-based routing + API routes mean no separate backend project to wire up. |
-| Language | **TypeScript** | Catches a class of bugs that would otherwise eat hours late at night. |
-| Styling | **Tailwind CSS** | Fastest path to mobile-friendly UI without a designer. |
-| Components | **shadcn/ui** | Copy-paste accessible primitives (Button, Dialog, Form, Input, Tabs, Card). Massive shortcut. |
-| Forms | **react-hook-form + zod** | Standard pairing, great mobile keyboard handling. |
-| Auth | **Clerk** | `<SignIn />` / `<SignUp />` / `<UserButton />` drop-in. Free tier covers hackathon. Email/password + reset out of the box. |
-| Database | **MongoDB Atlas** (free M0 cluster) + **mongoose** | Mongoose's schema-as-model is gentler for a learning team than the raw driver. |
-| AI vision | **Gemini API**, `gemini-2.5-flash` (`@google/genai` SDK) | Fast, generous free tier, native multimodal. Use `responseSchema` for strict JSON output — better than prompt-engineering JSON. Counts toward Gemini prize track. |
-| File upload | Plain `<input type="file" capture="environment">` | Native camera capture on mobile, no library. Upload to Vercel Blob or pass directly as base64/inlineData to Gemini. |
-| Charts (stretch) | **Recharts** | Only if there's time for the dashboard polish pass. |
-| Timezone helper | **date-fns-tz** (or `@date-fns/tz`) | Shared `America/Los_Angeles` bucketing on both client and server. Deterministic preset boundaries. |
-| Hosting | **Vercel** | One-click deploy from Git, free tier, env vars in dashboard. |
+| `src/imports/CONTRACTS.md` | `src/app/**/*` (except `src/app/api/**`) | `src/app/api/**` |
+| `src/imports/wellspring-build-brief.md` | `src/app/components/**` | `src/lib/db/**` |
+| `plans/PLAN.md` | `src/app/(routes)/**` page files | `src/lib/ai/**` |
+| `src/lib/types.ts` (canonical, mirrors `CONTRACTS.md §3`) | `src/app/styles/**` | `src/lib/auth/**` |
+| `src/lib/timezone.ts` (`TZ = "America/Los_Angeles"` constant only) | `src/app/components/wellspring/**` | `src/lib/seed/**` |
+| `package.json` (dependency adds; don't reorder existing entries) | Any new `*.tsx` under `src/app/components/` | Any `route.ts` under `src/app/api/` |
+| `.env.example` (each adds their own keys, never deletes) | `src/app/lib/api-client.ts` (frontend HTTP wrapper) | `src/lib/csv.ts`, `src/lib/audit.ts` |
 
-**Anti-recommendations:** No Redux/Zustand (use React Query or server components). No tRPC (overkill, learning curve). No custom design system (shadcn only). No microservices.
+If the file you need to touch isn't listed, it's safe to create it inside your column. If a brand-new file would land outside both columns, ping the other agent first.
+
+**`src/lib/types.ts` is the live mirror of `CONTRACTS.md §3`.** Backend regenerates it whenever §3 changes; frontend imports from it and never edits it directly.
 
 ---
 
-## System Architecture
+## 2. Phases & sequencing
 
-```
-┌──────────────────────────────────────────────┐
-│  Next.js app (Vercel)                        │
-│                                              │
-│  ┌────────────────┐    ┌───────────────────┐ │
-│  │ Mobile-first   │    │ Server actions    │ │
-│  │ React UI       │───▶│ + API routes      │ │
-│  │ (App Router)   │    │ (Next.js)         │ │
-│  └────────────────┘    └───────────────────┘ │
-│         │                       │            │
-└─────────┼───────────────────────┼────────────┘
-          │                       │
-     Clerk auth              Mongoose driver
-          │                       │
-          ▼                       ▼
-   ┌────────────┐         ┌──────────────────┐
-   │   Clerk    │         │  MongoDB Atlas   │
-   │  (hosted)  │         │  (M0 free tier)  │
-   └────────────┘         └──────────────────┘
-                                  │
-                         Vision API call
-                                  │
-                                  ▼
-                         ┌──────────────────┐
-                         │   Gemini API     │
-                         │  (2.5 Flash, via │
-                         │   @google/genai) │
-                         └──────────────────┘
-```
+Phases run **in order**, but within a phase the FE/BE columns run **in parallel**. A phase is only "done" when both columns have shipped their items and the integration check passes.
 
-**Data flow for the photo entry path** (the centerpiece demo):
-1. Volunteer taps "Log donations" → "📷 Photo"
-2. Native camera opens (`<input capture="environment">`)
-3. Image uploaded as base64 to `/api/recognize`
-4. Server reads active categories list (cached 60s) and builds Gemini's `responseSchema.enum` *dynamically* — newly-created categories are immediately suggestable
-5. Server calls Gemini 2.5 Flash with the dynamic `responseSchema`
-6. Server matches each suggested item against `itemCatalog` (case-insensitive name + alias matching), filling in `categoryId`, `categoryName`, `programName`, `defaultUnit`, and `estimatedValuePerUnit`. If `matchedCount === 0`, returns empty result — frontend bails to Log Home with a toast.
-7. Returns `{items, rawCount, matchedCount}` to client
-8. Volunteer sees an editable list with an inline `CategoryDropdown` per row (footer "+ New category" calls `POST /api/categories` and re-binds), fixes anything wrong, taps "Save all"
-9. Client posts to `/api/donations` (single bulk insert) — server denormalizes `categoryName` + `programName` from `categoryId` and emits a `donation.created` audit event per row
+### Phase 0 — Project skeleton (single coordinator pass, ~15 min)
 
----
+Done before either agent forks off. Coordinator:
+1. Initialize Next.js App Router project (already partially exists — the static mockup at `src/app/App.tsx` will become the `/log` route group).
+2. Install: `next`, `react`, `@clerk/nextjs`, `mongoose`, `@google/generative-ai`, `zod`, `lucide-react`, `tailwindcss@4`, `recharts` (only used on iPad Reports), `react-hook-form@7.55.0`.
+3. Add Clerk middleware stub at `src/middleware.ts` so all `/api/**` (except `/api/health`) require auth.
+4. Add `src/lib/types.ts` from `CONTRACTS.md §3` (verbatim).
+5. Add `src/lib/timezone.ts` exporting `export const APP_TZ = "America/Los_Angeles"`.
+6. Add `.env.example` with: `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `MONGODB_URI`, `GOOGLE_API_KEY`.
+7. Commit, then unblock both agents.
 
-## MongoDB Schema
+### Phase 1 — Foundations (parallel)
 
-Six collections. Aggressive denormalization on `donations` so reports stay simple. The `events` collection is append-only — no in-place updates or deletes.
-
-### `users`
-Mirror of Clerk users for joining/denormalization.
-```js
-{
-  _id: String,            // Clerk user ID
-  name: String,
-  email: String,
-  createdAt: Date,
-}
-```
-
-### `programs`
-Seeded once with the 4 programs from Jessica's email. Never written by the app.
-```js
-{
-  _id: ObjectId,
-  name: String,                       // "Nutritious Meals Program"
-  slug: String,                       // "nutritious-meals"
-  sortOrder: Number,
-}
-```
-
-### `categories`
-Seeded with ~25 categories from Jessica's email. Runtime CRUD via `/api/categories` (POST/PATCH/DELETE).
-```js
-{
-  _id: ObjectId,
-  name: String,                       // "Tea and Coffee"
-  programId: ObjectId,                // ref to programs
-  programName: String,                // denormalized
-  defaultUnit: String,                // "count" | "lbs" | "oz"
-  active: Boolean,                    // soft-delete flag
-  createdBy: String,                  // Clerk userId
-  createdAt: Date,
-  updatedAt: Date,
-}
-```
-
-### `itemCatalog`
-Seeded from Jessica's accepted-items list before the hackathon starts.
-```js
-{
-  _id: ObjectId,
-  name: String,                       // "Canned Black Beans"
-  categoryId: ObjectId,               // ref to categories
-  categoryName: String,               // denormalized
-  programName: String,                // denormalized
-  defaultUnit: String,                // "count" | "lbs" | "oz"
-  estimatedValuePerUnit: Number,      // USD
-  aliases: [String],                  // for AI fuzzy-matching: ["black beans", "canned beans"]
-  active: Boolean,                    // hide from pickers without losing history
-  createdAt: Date,
-  updatedAt: Date,
-}
-```
-
-### `donations` (the hot collection)
-```js
-{
-  _id: ObjectId,
-  loggedBy: String,                   // Clerk user ID
-  loggedByName: String,               // denormalized
-  itemId: ObjectId | null,            // ref to itemCatalog; null when not in catalog
-  itemName: String,                   // denormalized — survives catalog edits
-  categoryId: ObjectId,               // ref to categories
-  categoryName: String,               // snapshot — survives renames (CSV uses this)
-  programName: String,                // snapshot
-  quantity: Number,                   // integer for "count", up to 1dp for lbs/oz
-  unit: String,                       // "count" | "lbs" | "oz"
-  estimatedValue: Number,             // total $ for this entry
-  source: String,                     // "photo_ai" | "quick_pick" | "manual" | "barcode"
-  photoUrl: String | null,            // MVP: always null (Vercel Blob deferred)
-  notes: String | null,
-  donatedAt: Date,                    // when received (Manual Entry can backdate; AI/Quick Pick use server now)
-  createdAt: Date,                    // immutable
-  updatedAt: Date,                    // bumped on PATCH
-  deleted: Boolean,                   // soft-delete flag (default false)
-}
-```
-
-### `events` (audit log, append-only)
-Every donation/category/item write emits one row via `lib/audit.ts`.
-```js
-{
-  _id: ObjectId,
-  type: String,                       // AuditEventType (see CONTRACTS.md §3)
-  actorId: String,                    // Clerk userId
-  actorName: String,                  // denormalized
-  targetId: ObjectId,                 // donation/category/item id
-  targetLabel: String,                // human label, e.g. "Size 4 Diapers"
-  summary: String,                    // pre-formatted display string
-  createdAt: Date,
-}
-```
-
-### Indexes
-```js
-// donations
-{ donatedAt: -1 }                            // primary date-range scans
-{ categoryId: 1, donatedAt: -1 }             // "diapers this month"
-{ programName: 1, donatedAt: -1 }            // program-grouped reports
-{ itemId: 1, donatedAt: -1 }                 // "this specific item over time"
-{ loggedBy: 1, createdAt: -1 }               // "my recent entries"
-{ deleted: 1, donatedAt: -1 }                // active-only queries are the common path
-
-// itemCatalog
-{ categoryId: 1, active: 1 }                 // picker queries
-{ name: "text", aliases: "text" }            // AI fuzzy matching
-
-// categories
-{ programId: 1, active: 1 }                  // picker grouped by program
-{ name: 1, programId: 1 }                    // unique-within-program (partial filter on active: true)
-
-// events
-{ createdAt: -1 }                            // History feed default sort
-{ actorId: 1, createdAt: -1 }                // filter by who
-{ type: 1, createdAt: -1 }                   // filter by event type
-```
-
-### Reports aggregation pattern
-Group by `categoryId` (so renames consolidate cleanly) and `$lookup` the current category name. Always exclude soft-deleted donations.
-```js
-db.donations.aggregate([
-  { $match: { deleted: { $ne: true }, donatedAt: { $gte: start, $lte: end } } },
-  { $group: {
-      _id: { categoryId: "$categoryId", itemName: "$itemName", unit: "$unit" },
-      totalQuantity: { $sum: "$quantity" },
-      totalValue:    { $sum: "$estimatedValue" },
-      entryCount:    { $sum: 1 },
-  }},
-  { $lookup: { from: "categories", localField: "_id.categoryId", foreignField: "_id", as: "cat" } },
-  { $sort: { totalValue: -1 } },
-])
-```
-
----
-
-## Feature Breakdown — MVP
-
-In priority order. Anything below the line is stretch.
-
-1. **Auth** — sign up, sign in, password reset (Clerk drop-in components)
-2. **Seeded programs + categories + item catalog** — 4 programs, ~25 categories, Jessica's accepted-item list; loaded by `seed-programs.ts`, `seed-categories.ts`, and the existing item seeder
-3. **Quick-pick entry** — browse catalog by category, tap item, set quantity, save (the workhorse path)
-4. **AI photo entry** — snap photo → AI suggests items → review/edit → bulk save (the demo moment); bails to Log Home with a toast when `matchedCount === 0`
-5. **Manual entry fallback** — for items not in catalog; only screen with a backdate-able `donatedAt` picker
-6. **Per-entry editable** — unit and $ value can be overridden at log time
-7. **Inline category CRUD from AI Review** — `CategoryDropdown` with footer "+ New category"; rename + soft-archive available too
-8. **Reports dashboard** — date range picker (presets: this month, last month, Q2, YTD, custom; computed in `America/Los_Angeles`) + totals table by item with $ subtotals and grand total; supports `groupBy=item|category|program`
-9. **CSV export** — one-click from any report view; columns include `Program`; `Source` uses human labels
-10. **Edit / soft-delete past donations** — `PATCH/DELETE /api/donations/:id`, only original logger
-11. **History feed** — every volunteer sees every write event (donations + category writes) with actor names, grouped Today / Yesterday / older (Pacific)
-12. **Mobile-first responsive layout** — bottom nav bar on mobile (Log / Reports / **History** / Profile), sidebar on iPad
-
-### Stretch (in attack order if time permits)
-1. Barcode scanning fast-lane (html5-qrcode) — only for barcoded categories
-2. PDF export for tax filing (react-pdf)
-3. Charts on dashboard (Recharts: top items bar chart, daily trend line)
-4. Item-level admin screen (add/edit/retire individual catalog items, beyond the per-row inline create that AI Review provides)
-5. Scheduled email reports (Vercel Cron + Resend)
-6. ~~Donor tracking~~ — cut, see Build Order
-7. ~~Multi-language UI~~ — cut, see Build Order
-
----
-
-## 24-Hour Build Order (4 people)
-
-Roles are suggestions — swap if someone's stronger in another area. The point is **parallelism with clear boundaries**.
-
-### Hours 0–2 — Setup (everyone in parallel, get unblocked)
-- **A**: `npx create-next-app` + Clerk + deploy to Vercel. **Skeleton must be live with auth working by hour 2.**
-- **B**: MongoDB Atlas cluster + connection string + mongoose models for `User`, `Program`, `Category`, `ItemCatalog`, `Donation`, `Event` + seed scripts (`seed-programs.ts`, `seed-categories.ts`, `seed-catalog.ts`).
-- **C**: Tailwind + shadcn install, mobile shell (header, bottom tab bar with `Log` / `Reports` / `History` / `Profile`, route stubs for `/log`, `/reports`, `/history`)
-- **D**: Gemini API key from Google AI Studio, prove out the vision call in a small standalone script using `@google/genai` + `responseSchema`. **Do not skip this.** Iterate until it returns clean structured output for 3 sample photos.
-
-### Hours 2–8 — Core entry flow
-- **A**: Wire Clerk → mirror user in Mongo on first sign-in (just-in-time on first authenticated API call). Build the fetch wrapper that redirects to `/sign-in` on 401.
-- **B**: `POST /api/donations`, `GET /api/donations`, `GET /api/catalog`, `GET /api/programs`, `GET /api/categories`. Wire `lib/audit.ts` and emit `donation.created` events.
-- **C**: Quick-pick UI — browse catalog by category, tap → quantity stepper → save. This is the workhorse, polish it.
-- **D**: Photo capture component (`<input capture="environment">`) + `/api/recognize` endpoint that calls Gemini and matches against catalog. Build `lib/categories-cache.ts` for the dynamic enum.
-
-### Hours 8–14 — AI integration + reports + audit/CRUD
-- **A**: AI review/confirm screen — receives `/api/recognize` output, renders editable rows, bulk-save to `/api/donations`. Includes the inline `CategoryDropdown` component (with "+ New category" modal that calls `POST /api/categories`).
-- **B**: Aggregation pipeline + `GET /api/reports?from=&to=&groupBy=`. Plus `POST/PATCH/DELETE /api/categories`, `PATCH /api/donations/:id`, `DELETE /api/donations/:id` (soft), `GET /api/events`. Each write emits the right audit event via `lib/audit.ts`. Cache invalidation on category writes.
-- **C**: Reports page — date range picker (presets + custom, all in `America/Los_Angeles` via `lib/timezone.ts`), totals table, grand total $ value.
-- **D**: CSV export (server-side, returns `text/csv`) — column order `Date,Item,Category,Program,Quantity,Unit,Estimated Value,Source,Logged By,Notes`; human source labels; Pacific filename.
-
-### Hours 14–20 — Polish + integration
-- All: bug fixes, **test on actual phones** (multiple devices simultaneously), error states, loading states, success toasts
-- **A**: Build `/history` page (replaces `/me`) — feed of `AuditEvent`s grouped Today / Yesterday / older (Pacific). Tap-to-edit/delete on own donation events.
-- **B**: Realistic demo data seed (so dashboard + History aren't empty during judging) — multiple actors, multiple event types.
-- **C**: Empty states, error states, mobile polish pass. Verify the AI Review bail-out toast renders cleanly.
-- **D**: Hardening — Gemini fallback toasts, downscale large images client-side before posting, base64 prefix tolerance.
-
-### Hours 20–24 — Demo prep
-- Test on actual phones, multiple devices logging at once
-- Run through demo script 3+ times — including the *create-a-new-category-on-the-fly* demo moment
-- Fix only critical bugs — resist scope creep
-- Push final deploy and verify on the URL you'll demo from
-
-### Officially cut from stretch (no longer in scope)
-- Donor tracking
-- Multi-language UI
-
-These cuts make room for the audit log + History + category CRUD work absorbed into Hours 8–14 and 14–20.
-
----
-
-## Critical Files / Structure
-
-```
-/app
-  /(auth)/sign-in/[[...rest]]/page.tsx     # Clerk
-  /(auth)/sign-up/[[...rest]]/page.tsx
-  /log/page.tsx                            # entry point: photo | quick-pick | manual
-  /log/photo/page.tsx                      # camera capture + AI review
-  /log/quick-pick/page.tsx                 # browse-and-tap
-  /reports/page.tsx                        # date range + totals + CSV button
-  /history/page.tsx                        # team audit feed (replaces /me)
-  /api/donations/route.ts                  # POST (bulk), GET
-  /api/donations/[id]/route.ts             # PATCH, DELETE (soft)
-  /api/catalog/route.ts                    # GET
-  /api/programs/route.ts                   # GET
-  /api/categories/route.ts                 # GET, POST
-  /api/categories/[id]/route.ts            # PATCH, DELETE (soft)
-  /api/recognize/route.ts                  # POST image → Gemini → matched items
-  /api/reports/route.ts                    # GET aggregations
-  /api/reports/csv/route.ts                # GET CSV
-  /api/events/route.ts                     # GET audit feed
-/lib
-  /db.ts                                   # mongoose connection (cached)
-  /models/User.ts
-  /models/Program.ts
-  /models/Category.ts
-  /models/ItemCatalog.ts
-  /models/Donation.ts
-  /models/Event.ts
-  /vision.ts                               # Gemini 2.5 Flash call + dynamic responseSchema
-  /catalog-match.ts                        # fuzzy match AI output → catalog items
-  /categories-cache.ts                     # 60s in-memory cache of active categories for AI schema
-  /audit.ts                                # emit-event helper called from every write endpoint
-  /timezone.ts                             # shared "America/Los_Angeles" constant + helpers
-/scripts
-  /seed-programs.ts                        # 4 programs from Jessica's email
-  /seed-categories.ts                      # ~25 categories grouped by program
-  /seed-catalog.ts                         # loads Jessica's item list
-  /seed-demo-data.ts                       # realistic donations + audit events for demo
-```
-
----
-
-## Gemini Vision Call (sketch)
-
-Use `gemini-2.5-flash` with `responseSchema` so the model is *forced* to return valid structured data — no JSON parsing guesswork. The `category` enum is **read from the DB at request time** (cached 60s) so newly-created categories are immediately suggestable.
-
-```ts
-import { GoogleGenAI, Type } from "@google/genai";
-import { getCategoriesCache } from "@/lib/categories-cache";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-const activeCategories = await getCategoriesCache();   // 60s in-memory
-
-const responseSchema = {
-  type: Type.OBJECT,
-  properties: {
-    items: {
-      type: Type.ARRAY,
-      items: {
-        type: Type.OBJECT,
-        properties: {
-          name:               { type: Type.STRING },
-          category:           { type: Type.STRING, enum: activeCategories.map(c => c.name) },
-          estimated_quantity: { type: Type.NUMBER },
-          unit:               { type: Type.STRING, enum: ["count","lbs","oz"] },
-        },
-        required: ["name","category","estimated_quantity","unit"],
-      },
-    },
-  },
-  required: ["items"],
-};
-
-const result = await ai.models.generateContent({
-  model: "gemini-2.5-flash",
-  contents: [
-    { inlineData: { mimeType: "image/jpeg", data: base64Image } },
-    { text: "Identify donated items in this photo. Return one entry per distinct item." },
-  ],
-  config: { responseMimeType: "application/json", responseSchema },
-});
-const { items } = JSON.parse(result.text);
-```
-
-Then on the server, fuzzy-match each `name` against `itemCatalog.name + aliases` (case-insensitive substring or simple Levenshtein). On match: replace with the catalog item's canonical `name`, `categoryId`, `categoryName`, `programName`, `defaultUnit`, and `estimatedValuePerUnit`. On miss: keep AI's `name`/`categoryName`/`unit`/`quantity`, set `itemId: null` + `categoryId: null`, mark `warning: "not_in_catalog"`. Cache invalidates on any successful `POST/PATCH/DELETE /api/categories`.
-
----
-
-## Verification (end-to-end)
-
-Before declaring done, run through this on **actual phones**:
-
-1. Two volunteers sign in on two different phones simultaneously.
-2. Volunteer A: tap Photo → snap a photo of a pile of mixed donations → AI suggestions appear → edit one item, delete one, accept the rest → Save all.
-3. Volunteer B (at the same time): use Quick-pick → tap "Baby Consumables" category → tap "Size 4 Diapers" → set count to 24 → Save.
-4. Volunteer B: Manual entry → "Used baby crib" → set $25 value → date received = yesterday → Save.
-5. Both volunteers: open Reports → "This month" preset → both volunteers' entries appear, totals correct, grand $ value correct.
-6. Pick a custom range that excludes today → entries disappear from totals.
-7. Click "Export CSV" → file downloads → opens cleanly in Excel/Sheets with all columns including `Program`.
-8. Test password reset email actually arrives (Clerk dashboard → trigger from sign-in screen).
-9. Sign out → sign back in → entries persist; History shows both volunteers' entries with correct names.
-10. Volunteer A creates "Dog Leashes" (program: Other / Misc) inline from AI Review → it shows up in the next AI run's category enum and in Quick Pick once an item is added under it.
-11. Volunteer A renames "Diapers" → "Adult Diapers" → CSV for past donations still says "Diapers"; Reports group both names under the renamed category via `categoryId`.
-12. Volunteer B opens History → sees A's rename event and recent donations from both volunteers, each with the correct actor name + Pacific timestamp.
-13. Volunteer A edits one of their own past donations → `donations` row updates; History gets a `donation.updated` row showing the diff.
-14. Volunteer A tries to PATCH or DELETE Volunteer B's donation → 403.
-
-If any of these break, that's a P0 bug for the final 4-hour window.
-
----
-
-## Risks & Mitigations
-
-| Risk | Mitigation |
+| Frontend | Backend |
 |---|---|
-| Gemini API hiccups during demo | Quick-pick path is the fallback; both paths land in the same `/api/donations`. Demo can pivot. Free tier rate limits are generous but not infinite — don't hammer the API in tests right before judging. |
-| Team blocked on Mongoose schema decisions | Schema is in this plan — copy it directly, refine only if a real bug appears. |
-| Mobile camera doesn't work on someone's phone | `<input capture="environment">` works on all modern iOS Safari + Android Chrome. Test early (hour 2, not hour 22). |
-| Clerk + Mongo user-mirror gets weird | Just-in-time create user record on first authenticated API call. Skip webhooks for MVP. |
-| Time blown on prompt engineering | Cap it at 2 hours. If accuracy is mediocre at hour 4, ship it — review/edit step covers the gap. |
-| Three people committing at once breaks main | Branch per feature, merge often, one person rebases when needed. |
-| Demo-day wifi at venue is bad | Wifi was assumed in MVP scope. If hackathon venue has bad wifi, budget 1h hotfix at hour 22 to add a "queue and retry" wrapper around `/api/donations`. |
-| Dynamic Gemini schema gets stale after a volunteer creates a new category | 60s in-memory cache in `lib/categories-cache.ts` + invalidate on any successful POST/PATCH/DELETE to `/api/categories`. |
-| Audit log scope creep eats build time | Cap initial event types at 4 (`donation.created` / `updated` / `deleted`, `category.renamed`); add `category.created` / `archived` and `item.*` only if Hours 14–20 has slack. |
-| Mongo `$lookup` perf on reports | Free-tier M0 is fine for hackathon volume (~hundreds of donations). Don't optimize until measured. |
+| Lift the existing static mockup into route groups: `app/(auth)/sign-in`, `app/(app)/log`, `/log/photo`, `/log/quick`, `/log/manual`, `/log/review`, `/reports`, `/history`, `/profile`. | Stand up `src/lib/db/mongoose.ts` (cached connection), Mongoose models for `users`, `programs`, `categories`, `itemCatalog`, `donations`, `events`. Use the field shapes implied by `CONTRACTS.md §3` + §8. |
+| Wrap root layout with `<ClerkProvider>` + `BottomTabBar`/`IpadShell` chrome. | Implement `lib/auth/requireAuth.ts` returning `{ userId, name, initials }` (JIT-upserts the `users` doc). |
+| Implement `src/app/lib/api-client.ts` — typed fetch wrapper, redirects to `/sign-in` on 401, parses `ApiError` envelope. | Implement `src/lib/audit.ts` with one `recordEvent(type, actor, target, summary)` helper used by every write route. |
+| Build the design-system primitives in `src/app/components/wellspring/shared.tsx` (already done in mockup — port unchanged). | Seed script at `src/lib/seed/seed.ts`: 4 programs, ~25 categories from Jessica's email, ~15 catalog items. Idempotent. |
+| Stub each route page to render the existing static screen (will swap to live data in Phase 2). | Implement `GET /api/health`, `GET /api/programs`, `GET /api/categories`, `GET /api/catalog`. |
+
+**Phase 1 integration check:** frontend can boot, navigate every screen, and call `GET /api/programs` + `GET /api/categories` and see seeded data.
+
+### Phase 2 — Core write paths (parallel)
+
+| Frontend | Backend |
+|---|---|
+| Wire **Manual Entry** form to `POST /api/donations` (single-item array). Show success toast → route to History. | Implement `POST /api/donations` (bulk-insert, denormalize, emit `donation.created` events). |
+| Wire **Quick Pick** multi-select bottom bar → same endpoint with `source: "quick_pick"`. | Implement `POST /api/categories`, `PATCH /api/categories/:id`, `DELETE /api/categories/:id` (soft delete + audit). |
+| Wire **+ New category** modal (screen 4b) on AI Review and Manual Entry to `POST /api/categories`; on 201 the new category is selected for the row that opened it and appears in every other dropdown. | Implement `PATCH /api/donations/:id`, `DELETE /api/donations/:id` with `403` if `loggedBy !== userId`. |
+| Wire **History** to `GET /api/events` with bucket headers in `APP_TZ`. | Implement `GET /api/events` (filter + sort DESC, default limit 50). |
+| Wire **Profile** time-range chips → `GET /api/profile/me?from&to`. | Implement `GET /api/profile/me` aggregations (see `CONTRACTS.md §4.9`). |
+
+**Phase 2 integration check:** end-to-end flow Manual Entry → History → Profile all hit live endpoints.
+
+### Phase 3 — AI flow + reports (parallel)
+
+| Frontend | Backend |
+|---|---|
+| Wire **Photo Capture → AI Review**: read file as base64, `POST /api/recognize`, render review cards. | Implement `POST /api/recognize`: validate ≤5 MB, build dynamic Gemini `responseSchema` from active categories (60s in-memory cache + invalidation on category writes), match against `itemCatalog`. |
+| Implement the AI Review **bail-out toast** (matchedCount === 0 → toast + route back to `/log`). | Surface `502 AI_UNAVAILABLE` and `429 RATE_LIMITED` with the standard envelope. |
+| Implement **Add item** button on AI Review (creates a card with the green `Added` chip; `source: "photo_ai"` still). | Implement `GET /api/reports` aggregation (group by `categoryId`, return current category names; tiebreaker alphabetical itemName ASC). |
+| Wire **Reports** date-preset chips → `GET /api/reports`; render mobile (2 stat cards) + iPad (4 stat cards + table + top-5 bar chart). | Implement `GET /api/reports/csv` with the exact column order from `CONTRACTS.md §4.6`; filename uses Pacific dates. |
+| Wire mobile + iPad **Export CSV** button to `GET /api/reports/csv`. Note: only **one** export entry point on Reports — no top-bar download. | |
+
+**Phase 3 integration check:** demo flow — sign in → take a photo → see AI review with 5 items → tweak quantity → save → appears in History → appears in Reports total.
+
+### Phase 4 — Polish (parallel)
+
+| Frontend | Backend |
+|---|---|
+| Empty states for History / Reports / Profile (`entryCount: 0`). | Tighten `400` validation messages with field paths. |
+| Loading + error toasts wired to the `ApiError.code` map. | Add `lib/categories-cache.ts` invalidation tests. |
+| Manual QA pass on iPad fixed-size screens (no scroll on AI Review iPad; everything fits 1024 × 768). | Final smoke-test of seed script on a fresh DB. |
+
+---
+
+## 3. Frontend agent — task list (read in full before starting)
+
+You own: `src/app/**` (except `src/app/api/**`), all `*.tsx` components, page routes, styles, and the API-client wrapper. You **read** `CONTRACTS.md` and **import** from `src/lib/types.ts` — you don't write to either.
+
+1. Convert the static mockup in `src/app/App.tsx` into a Next.js App Router structure. Each existing screen component becomes the body of a route page.
+2. Keep `src/app/components/wellspring/shared.tsx` as the design system. Don't duplicate primitives elsewhere.
+3. Build `src/app/lib/api-client.ts` with typed methods that mirror `CONTRACTS.md §4`. On `401`, `window.location.href = "/sign-in"`. On `ApiError` codes, map to user-facing toast strings.
+4. **Hard rules from the mockup work — do not regress these:**
+   - `Unit` is `"count" | "lbs"`. **No `oz` anywhere.**
+   - AI Review: 2-row compact cards; unit is a plain text label (no dropdown); unit-price is editable; line total = qty × unit-price in brand green.
+   - AI Review: separate **Captured photo** strip + green **AI match banner** with the wording `AI found N items — review and edit before saving.` — same on mobile and iPad. iPad has no timestamp/dimensions on the photo card.
+   - Bottom tab bar has **4 tabs**: Log · Reports · History · Profile.
+   - New Category modal has a **count / lbs** segment and the produce tip — never three options.
+   - Reports has **one** Export CSV entry point (the footer button), not a top-bar download.
+   - Profile has no shift streak, no "On shift today", no shifts/photos counters, no help & feedback.
+5. Match brand color `#39900E` exactly. Don't invent colors. Set typography via inline styles or `theme.css` — never with Tailwind size/weight utilities.
+6. The Sign-In mobile hero must scatter 12 hand-placed leaves across the full 288px hero — not bunched at the top.
+7. iPad AI Review must fit 1024 × 768 with `overflow: hidden`. If it stops fitting after a change, fix the layout — don't enable scroll.
+8. When you need a wire-format change (new field, new endpoint), edit `CONTRACTS.md` per its §10 protocol *first*, post the diff to the backend agent, then implement against the new shape.
+
+---
+
+## 4. Backend agent — task list (read in full before starting)
+
+You own: `src/app/api/**`, `src/lib/db/**`, `src/lib/ai/**`, `src/lib/auth/**`, `src/lib/seed/**`, `src/lib/csv.ts`, `src/lib/audit.ts`, the seed script, and the `src/lib/types.ts` mirror. You **read** `CONTRACTS.md` as the spec — and you **regenerate** `src/lib/types.ts` whenever §3 changes.
+
+1. Mongoose models follow `CONTRACTS.md §8`. Use Mongoose `toJSON` transforms to project `_id → id` and dates → ISO strings so the wire format matches §3 exactly.
+2. Every write route **must** go through `recordEvent` from `src/lib/audit.ts`. Don't inline event inserts.
+3. Soft-delete everywhere. `Donation.deleted = true`, `Category.active = false`, `CatalogItem.active = false`. Reports & list endpoints filter `deleted: { $ne: true }` / `active: true`.
+4. Denormalization is your job — frontend never sets `loggedBy`, `loggedByName`, `categoryName`, `programName`. Snapshot them at write time and **don't** rewrite snapshots when a category is later renamed (renames consolidate at aggregation time via `categoryId`, not by mutating donation rows).
+5. `POST /api/donations` always takes an array. Single-entry callers (Manual Entry) send an array of length 1.
+6. `POST /api/recognize` does **not** write to Mongo. Frontend posts a follow-up `POST /api/donations` after the volunteer confirms. Cache categories for 60s; invalidate on `POST/PATCH/DELETE /api/categories`.
+7. `GET /api/reports/csv` uses the exact header `Date,Item,Category,Program,Quantity,Unit,Estimated Value,Source,Logged By,Notes` and Pacific dates in the filename.
+8. `GET /api/profile/me`:
+   - `topCategories` uses **current** category names (post-rename) but groups by `categoryId` snapshot from donations; cap at 5 with the rest collapsed into `Other`.
+   - `recentEntries` is the last 4 by `donatedAt` DESC for the current user, ignoring `from`/`to`.
+9. Errors: every non-2xx returns the envelope from `CONTRACTS.md §7`. No raw stacks. Use the codes listed there — don't invent new ones without updating §7 first.
+10. Seed script must be **idempotent** (`upsert` by name) — both agents run it locally during development.
+
+---
+
+## 5. Shared types contract
+
+`src/lib/types.ts` is the only TS file both agents import from. Its contents are a **direct copy** of `CONTRACTS.md §3`. Workflow:
+- Backend agent edits §3, then mirrors into `src/lib/types.ts` in the same commit.
+- Frontend agent re-imports — never hand-edits the file.
+- If frontend needs a new shape, propose the `CONTRACTS.md` diff in chat first; backend acks; backend lands the §3 + `types.ts` change; frontend builds against it.
+
+This single mirroring rule is what keeps the two agents' implementations from drifting.
+
+---
+
+## 6. Coordination protocol
+
+When you need to touch a **shared** file (left column of §1), follow this:
+
+1. **Announce** in the shared chat: `"Editing CONTRACTS.md §4.4 to add field X"`.
+2. **Edit** the doc (`CONTRACTS.md`, this file, or the build brief).
+3. **Add a `// CHANGED <today>: …` note** at the top of the affected section.
+4. **Wait** for the other agent's ack before relying on the new shape in non-shared code.
+
+Do not rebase or rewrite the other agent's commits in shared files. If the file looks scrambled after a pull, stop and ping — don't auto-resolve.
+
+---
+
+## 7. Demo acceptance checklist
+
+The MVP is "done" when an unprimed reviewer can, in one sitting:
+
+- [ ] Sign in via Clerk on mobile and iPad layouts.
+- [ ] Take/upload a photo → see ≥3 AI-suggested items → tweak one quantity, change one category, add a new category from the inline modal, add one extra item via "+ Add item" → Save all → toast → appear in History within 2s.
+- [ ] Switch to Quick Pick → multi-select 3 items → save → appear in History.
+- [ ] Switch to Manual Entry → fill the form (program → category → qty/unit/value/date/notes) → save → appear in History.
+- [ ] Open Reports → switch the date-preset chips → see updated totals → click Export CSV → file downloads with the correct header row and Pacific filename.
+- [ ] Open History → see the full feed with `Today`/`Yesterday` buckets in Pacific time.
+- [ ] Open Profile → see `47 entries · $612 logged · top categories` for Jessica → switch the time-range chip and watch the numbers update.
+- [ ] Try to PATCH/DELETE someone else's donation → server returns `403 FORBIDDEN`.
+- [ ] Pull network → AI Photo flow shows the `AI unavailable — try Quick Pick` toast.
+- [ ] No `oz` string appears anywhere in the rendered UI or in the CSV.
+
+---
+
+## 8. Out of scope (do not start, do not assume)
+
+Mirrors `CONTRACTS.md §9` and the brief's *Out of Scope*. Listed here too so neither agent has to chase the cross-reference:
+
+- Photo persistence (`photoUrl` is always `null` in MVP).
+- Hard delete of any record.
+- Item-level admin UI.
+- Cross-volunteer edit/delete.
+- Webhooks (Clerk → Mongo is JIT).
+- Pagination cursors, real-time updates, multi-tenancy, dark mode, push.
+- The `oz` unit anywhere — fully removed in this revision.
