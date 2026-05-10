@@ -1126,7 +1126,7 @@ export function NewCategoryModal({
     }
     setSubmitting(true);
     try {
-      const { apiClient, ApiClientError } = await import("../../lib/api-client");
+      const { apiClient } = await import("../../lib/api-client");
       const cat = await apiClient.createCategory({ name: trimmed, programId, defaultUnit });
       apiClient.invalidateCategoriesCache();
       onCreated(cat);
