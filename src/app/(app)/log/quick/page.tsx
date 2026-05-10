@@ -185,8 +185,8 @@ export default function QuickPickPage() {
         setErrorToast("Count items must use whole numbers.");
         return;
       }
-      if (!Number.isFinite(r.estimatedValue) || r.estimatedValue < 0) {
-        setErrorToast("Each item needs a valid estimated value.");
+      if (!Number.isFinite(r.estimatedValue) || r.estimatedValue <= 0) {
+        setErrorToast("Each item needs an estimated value greater than zero.");
         return;
       }
     }

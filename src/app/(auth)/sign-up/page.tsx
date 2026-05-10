@@ -152,7 +152,25 @@ export default function SignUpPage() {
               borderRadius: "8px",
             },
             elements: {
-              card: "shadow-none border-0 bg-transparent",
+              rootBox: "w-full",
+              card: "shadow-none border-0 bg-transparent w-full p-0",
+              headerTitle: "text-[#0f172a] font-semibold",
+              headerSubtitle: "text-[#475569]",
+              formButtonPrimary:
+                "bg-[#2a6b0a] hover:bg-[#1f4d08] text-white font-medium normal-case shadow-none",
+              formFieldLabel: "text-[#0f172a] font-medium",
+              formFieldInput:
+                "border-slate-200 focus:border-[#2a6b0a] focus:ring-1 focus:ring-[#2a6b0a]",
+              formFieldHintText: "text-slate-500",
+              formFieldErrorText: "text-[#dc2626]",
+              identityPreviewEditButton: "text-[#2a6b0a] hover:text-[#1f4d08]",
+              formResendCodeLink: "text-[#2a6b0a] hover:text-[#1f4d08]",
+              socialButtonsBlockButton:
+                "border-slate-200 text-[#0f172a] hover:bg-slate-50 normal-case font-medium",
+              dividerLine: "bg-slate-200",
+              dividerText: "text-slate-500",
+              formButtonReset: "text-[#2a6b0a] hover:text-[#1f4d08]",
+              footerActionLink: "text-[#2a6b0a] hover:text-[#1f4d08] font-medium",
               footer: "hidden",
             },
           }}

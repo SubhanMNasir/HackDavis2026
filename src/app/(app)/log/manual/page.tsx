@@ -203,7 +203,7 @@ export default function ManualEntryPage() {
     if (!Number.isFinite(q) || q <= 0) return false;
     if (unit === "count" && !Number.isInteger(q)) return false;
     const v = Number(estimatedValue);
-    if (!Number.isFinite(v) || v < 0) return false;
+    if (!Number.isFinite(v) || v <= 0) return false;
     if (!donatedAt) return false;
     return true;
   })();

@@ -5,7 +5,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { Category, Program, RecognizedItem, Unit } from "@/lib/types";
+import type { CatalogItem, Category, Program, RecognizedItem, Unit } from "@/lib/types";
 import {
   AlertTriangle,
   Camera,
@@ -17,6 +17,7 @@ import {
   Field,
   Minus,
   NewCategoryModal,
+  NewItemModal,
   NumberInput,
   PageHeader,
   Plus,
@@ -48,17 +49,19 @@ interface RowState {
   categoryId: string | null;
   categoryName: string;
   programName: string | null;
-  quantity: number;
+  // Nullable so AI-blanked lbs items + cleared inputs render as empty fields
+  // instead of "0", which would silently pass save validation.
+  quantity: number | null;
   unit: Unit;
-  estimatedValue: number;
+  estimatedValue: number | null;
   matched: boolean;
   warning?: "not_in_catalog";
   /** Original snapshot for "Edited" detection. */
   initial: {
     categoryId: string | null;
-    quantity: number;
+    quantity: number | null;
     unit: Unit;
-    estimatedValue: number;
+    estimatedValue: number | null;
   };
   deleted: boolean;
 }
@@ -121,6 +124,10 @@ export default function AiReviewPage() {
 
   // Which row's "+ New category" was clicked (so we can autoselect the result).
   const [newCategoryRowId, setNewCategoryRowId] = React.useState<string | null>(null);
+  // Top-level "+ Add item" / "+ New category" — supports the partial-match
+  // flow where AI saw some items but the volunteer still needs to log others.
+  const [showAddItemTop, setShowAddItemTop] = React.useState(false);
+  const [showAddCategoryTop, setShowAddCategoryTop] = React.useState(false);
 
   // Hydrate from sessionStorage on mount.
   React.useEffect(() => {
@@ -174,7 +181,7 @@ export default function AiReviewPage() {
 
   const visibleRows = React.useMemo(() => rows.filter((r) => !r.deleted), [rows]);
   const totalValue = React.useMemo(
-    () => visibleRows.reduce((s, r) => s + (Number.isFinite(r.estimatedValue) ? r.estimatedValue : 0), 0),
+    () => visibleRows.reduce((s, r) => s + (r.estimatedValue ?? 0), 0),
     [visibleRows],
   );
 
@@ -220,7 +227,7 @@ export default function AiReviewPage() {
         setErrorToast("Pick a category for every item");
         return;
       }
-      if (!Number.isFinite(r.quantity) || r.quantity <= 0) {
+      if (r.quantity === null || !Number.isFinite(r.quantity) || r.quantity <= 0) {
         setErrorToast("Each item needs a quantity greater than zero.");
         return;
       }
@@ -228,8 +235,12 @@ export default function AiReviewPage() {
         setErrorToast("Count items must use whole numbers.");
         return;
       }
-      if (!Number.isFinite(r.estimatedValue) || r.estimatedValue < 0) {
-        setErrorToast("Each item needs a valid estimated value.");
+      if (
+        r.estimatedValue === null ||
+        !Number.isFinite(r.estimatedValue) ||
+        r.estimatedValue <= 0
+      ) {
+        setErrorToast("Each item needs an estimated value greater than zero.");
         return;
       }
     }
@@ -239,9 +250,9 @@ export default function AiReviewPage() {
       itemId: r.itemId,
       itemName: r.name,
       categoryId: r.categoryId as string,
-      quantity: r.quantity,
+      quantity: r.quantity as number,
       unit: r.unit,
-      estimatedValue: r.estimatedValue,
+      estimatedValue: r.estimatedValue as number,
       source: "photo_ai",
       photoUrl: null,
       notes: null,
@@ -372,6 +383,41 @@ export default function AiReviewPage() {
           </span>
         </div>
 
+        {/* Add affordances — for partial AI matches the volunteer can add the
+            items the AI missed without bouncing back to the photo screen. */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowAddItemTop(true)}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5"
+            style={{
+              background: "white",
+              color: "var(--brand-green-dark)",
+              border: "1px dashed var(--brand-border)",
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            <Plus size={14} strokeWidth={1.75} />
+            <span>Add item</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowAddCategoryTop(true)}
+            className="inline-flex items-center gap-1 rounded-full px-3 py-1.5"
+            style={{
+              background: "white",
+              color: "var(--brand-green-dark)",
+              border: "1px dashed var(--brand-border)",
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            <Plus size={14} strokeWidth={1.75} />
+            <span>New category</span>
+          </button>
+        </div>
+
         {visibleRows.length === 0 ? (
           <EmptyState
             icon={Camera}
@@ -467,11 +513,51 @@ export default function AiReviewPage() {
       )}
 
       <NewCategoryModal
-        isOpen={newCategoryRowId !== null}
-        onClose={() => setNewCategoryRowId(null)}
+        isOpen={newCategoryRowId !== null || showAddCategoryTop}
+        onClose={() => {
+          setNewCategoryRowId(null);
+          setShowAddCategoryTop(false);
+        }}
         programs={programs}
         defaultProgramId={undefined}
         onCreated={handleNewCategoryCreated}
+      />
+
+      <NewItemModal
+        isOpen={showAddItemTop}
+        onClose={() => setShowAddItemTop(false)}
+        categories={categories}
+        defaultCategoryId={undefined}
+        onCreated={(item) => {
+          // lbs items start blank — the volunteer must weigh + price them
+          // (same rule the AI flow follows for matched lbs items).
+          const isLbs = item.defaultUnit === "lbs";
+          const initialQty: number | null = isLbs ? null : 1;
+          const initialValue: number | null = isLbs ? null : item.estimatedValuePerUnit;
+          setRows((prev) => [
+            ...prev,
+            {
+              rowId: makeRowId(),
+              itemId: item.id,
+              name: item.name,
+              categoryId: item.categoryId,
+              categoryName: item.categoryName,
+              programName: item.programName ?? null,
+              quantity: initialQty,
+              unit: item.defaultUnit,
+              estimatedValue: initialValue,
+              matched: true,
+              initial: {
+                categoryId: item.categoryId,
+                quantity: initialQty,
+                unit: item.defaultUnit,
+                estimatedValue: initialValue,
+              },
+              deleted: false,
+            },
+          ]);
+          setShowAddItemTop(false);
+        }}
       />
     </>
   );
@@ -493,8 +579,8 @@ function ReviewRowCard({
   categories: Category[];
   categoriesLoading: boolean;
   onChangeCategory: (cat: Category) => void;
-  onChangeQuantity: (n: number) => void;
-  onChangeValue: (v: number) => void;
+  onChangeQuantity: (n: number | null) => void;
+  onChangeValue: (v: number | null) => void;
   onDelete: () => void;
   onOpenNewCategory: () => void;
 }) {
@@ -504,18 +590,24 @@ function ReviewRowCard({
   // Local input buffers — same pattern as Quick Pick. Lets the user erase a
   // field to empty without snapping back to "0", and the refs prevent the
   // resync effect from clobbering the user's in-progress text after we emit.
-  const [qtyText, setQtyText] = React.useState<string>(String(row.quantity));
-  const [valueText, setValueText] = React.useState<string>(String(row.estimatedValue));
-  const lastEmittedQty = React.useRef<number>(row.quantity);
-  const lastEmittedValue = React.useRef<number>(row.estimatedValue);
+  // null = field is intentionally blank (AI declined for lbs, or user cleared);
+  // save validation rejects these so they can never make it into a donation.
+  const [qtyText, setQtyText] = React.useState<string>(
+    row.quantity === null ? "" : String(row.quantity),
+  );
+  const [valueText, setValueText] = React.useState<string>(
+    row.estimatedValue === null ? "" : String(row.estimatedValue),
+  );
+  const lastEmittedQty = React.useRef<number | null>(row.quantity);
+  const lastEmittedValue = React.useRef<number | null>(row.estimatedValue);
 
   React.useEffect(() => {
     if (row.quantity !== lastEmittedQty.current) {
-      setQtyText(String(row.quantity));
+      setQtyText(row.quantity === null ? "" : String(row.quantity));
       lastEmittedQty.current = row.quantity;
     }
     if (row.estimatedValue !== lastEmittedValue.current) {
-      setValueText(String(row.estimatedValue));
+      setValueText(row.estimatedValue === null ? "" : String(row.estimatedValue));
       lastEmittedValue.current = row.estimatedValue;
     }
   }, [row.quantity, row.estimatedValue]);
@@ -564,7 +656,8 @@ function ReviewRowCard({
               type="button"
               onClick={() => {
                 const step = row.unit === "count" ? 1 : 0.1;
-                const next = Math.max(step, +(row.quantity - step).toFixed(2));
+                const current = row.quantity ?? 0;
+                const next = Math.max(step, +(current - step).toFixed(2));
                 setQtyText(String(next));
                 lastEmittedQty.current = next;
                 onChangeQuantity(next);
@@ -583,7 +676,11 @@ function ReviewRowCard({
               onChange={(e) => {
                 const text = e.target.value;
                 setQtyText(text);
-                if (text === "") return;
+                if (text === "") {
+                  lastEmittedQty.current = null;
+                  onChangeQuantity(null);
+                  return;
+                }
                 const n = Number(text);
                 if (Number.isFinite(n) && n >= 0) {
                   lastEmittedQty.current = n;
@@ -598,7 +695,8 @@ function ReviewRowCard({
               type="button"
               onClick={() => {
                 const step = row.unit === "count" ? 1 : 0.1;
-                const next = +(row.quantity + step).toFixed(2);
+                const current = row.quantity ?? 0;
+                const next = +(current + step).toFixed(2);
                 setQtyText(String(next));
                 lastEmittedQty.current = next;
                 onChangeQuantity(next);
@@ -645,8 +743,8 @@ function ReviewRowCard({
                 const text = e.target.value;
                 setValueText(text);
                 if (text === "") {
-                  lastEmittedValue.current = 0;
-                  onChangeValue(0);
+                  lastEmittedValue.current = null;
+                  onChangeValue(null);
                   return;
                 }
                 const n = Number(text);

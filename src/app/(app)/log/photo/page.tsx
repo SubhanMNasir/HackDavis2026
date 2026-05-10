@@ -153,8 +153,10 @@ export default function PhotoPage() {
         mimeType: "image/jpeg",
       });
 
-      if (result.matchedCount === 0) {
-        setErrorToast("Could not match item to catalog. Try again or manually select.");
+      // Only error out when the AI saw nothing at all — partial matches still
+      // go to Review so the volunteer can correct categories or remove items.
+      if (result.items.length === 0) {
+        setErrorToast("Couldn't identify any items in the photo. Try again or use Quick Pick.");
         reset();
         return;
       }

@@ -83,9 +83,11 @@ export interface RecognizedItem {
   categoryId: string | null; // null when category itself was unmatched
   categoryName: string; // canonical if matched, AI-suggested otherwise
   programName: string | null; // null when category was unmatched
-  suggestedQuantity: number;
+  // null = AI declined to guess (e.g. lbs items where weight needs a scale).
+  // The Review screen shows an empty input and requires the volunteer to fill in.
+  suggestedQuantity: number | null;
   unit: Unit;
-  estimatedValue: number; // qty × catalog price, or AI guess for unmatched
+  estimatedValue: number | null; // qty × catalog price, or null when qty is null
   matched: boolean; // true if itemId !== null
   warning?: "not_in_catalog"; // shown as a red chip in the UI
 }

@@ -208,33 +208,38 @@ export async function recognizeItemsFromImage(
     const match = findCatalogMatch(aiName, args.catalog);
 
     if (match) {
-      // Use catalog defaults; only honor the AI's unit when it is a valid
-      // value AND it disagrees with the catalog default (rare — covers cases
-      // like a catalog item normally counted but currently weighed in bulk).
-      const unit: Unit =
-        aiUnit && aiUnit !== match.defaultUnit ? aiUnit : match.defaultUnit;
+      // Catalog is the source of truth for unit — the AI can't see weight
+      // accurately, so we never let it override count↔lbs. For lbs items we
+      // also blank quantity/value so the volunteer is forced to weigh + price
+      // them rather than ship the AI's hallucinated number.
+      const unit: Unit = match.defaultUnit;
+      const isLbs = unit === "lbs";
       return {
         itemId: match._id.toString(),
         name: match.name,
         categoryId: match.categoryId.toString(),
         categoryName: match.categoryName,
         programName: match.programName,
-        suggestedQuantity: aiQty,
+        suggestedQuantity: isLbs ? null : aiQty,
         unit,
-        estimatedValue: Math.round(aiQty * match.estimatedValuePerUnit * 100) / 100,
+        estimatedValue: isLbs
+          ? null
+          : Math.round(aiQty * match.estimatedValuePerUnit * 100) / 100,
         matched: true,
       };
     }
 
+    const unmatchedUnit: Unit = aiUnit ?? "count";
+    const unmatchedIsLbs = unmatchedUnit === "lbs";
     return {
       itemId: null,
       name: aiName || "Unknown item",
       categoryId: null,
       categoryName: aiCategory,
       programName: null,
-      suggestedQuantity: aiQty,
-      unit: aiUnit ?? "count",
-      estimatedValue: aiValue,
+      suggestedQuantity: unmatchedIsLbs ? null : aiQty,
+      unit: unmatchedUnit,
+      estimatedValue: unmatchedIsLbs ? null : aiValue,
       matched: false,
       warning: "not_in_catalog",
     };
