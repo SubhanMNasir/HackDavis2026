@@ -220,22 +220,24 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Header card */}
+        {/* Header card — avatar + name sit on the green band; account info goes
+            in the white area below so it never crowds the gradient edge. */}
         <Card padded={false} className="md:col-span-2 overflow-hidden">
           <div
+            className="flex items-center gap-4 px-5 py-5"
             style={{
               background:
                 "linear-gradient(160deg, var(--brand-green-darkest), var(--brand-green-dark) 50%, var(--brand-green))",
-              height: 80,
             }}
-          />
-          <div className="-mt-8 flex flex-wrap items-end gap-4 px-5 pb-5">
+          >
             <Avatar name={fullName} size={64} className="ring-4 ring-white" />
-            <div className="flex flex-col">
-              <span style={{ fontSize: 18, fontWeight: 600 }}>{displayName}</span>
-              <Subtle>Volunteer</Subtle>
-              {email && <Subtle>{email}</Subtle>}
-            </div>
+            <span style={{ fontSize: 18, fontWeight: 600, color: "white" }}>
+              {displayName}
+            </span>
+          </div>
+          <div className="flex flex-col gap-1 px-5 py-4">
+            <Subtle>Volunteer</Subtle>
+            {email && <Subtle>{email}</Subtle>}
           </div>
         </Card>
 

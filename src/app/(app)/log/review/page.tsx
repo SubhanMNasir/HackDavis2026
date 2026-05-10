@@ -395,7 +395,6 @@ export default function AiReviewPage() {
                   categoriesLoading={categoriesLoading}
                   onChangeCategory={(cat) => handleSelectCategory(r.rowId, cat)}
                   onChangeQuantity={(n) => updateRow(r.rowId, { quantity: n })}
-                  onChangeUnit={(u) => updateRow(r.rowId, { unit: u })}
                   onChangeValue={(v) => updateRow(r.rowId, { estimatedValue: v })}
                   onDelete={() => deleteRow(r.rowId)}
                   onOpenNewCategory={() => setNewCategoryRowId(r.rowId)}
@@ -486,7 +485,6 @@ function ReviewRowCard({
   categoriesLoading,
   onChangeCategory,
   onChangeQuantity,
-  onChangeUnit,
   onChangeValue,
   onDelete,
   onOpenNewCategory,
@@ -496,7 +494,6 @@ function ReviewRowCard({
   categoriesLoading: boolean;
   onChangeCategory: (cat: Category) => void;
   onChangeQuantity: (n: number) => void;
-  onChangeUnit: (u: Unit) => void;
   onChangeValue: (v: number) => void;
   onDelete: () => void;
   onOpenNewCategory: () => void;
@@ -615,20 +612,19 @@ function ReviewRowCard({
         </Field>
 
         <Field label="Unit">
-          <select
-            value={row.unit}
-            onChange={(e) => onChangeUnit(e.target.value as Unit)}
-            className="rounded-[8px] bg-white px-3 py-2.5 outline-none"
+          <div
+            className="rounded-[8px] bg-slate-50 px-3 py-2.5"
             style={{
               border: "1px solid var(--border-default)",
               fontSize: 14,
               fontWeight: 500,
               color: "var(--text-primary)",
+              minWidth: 76,
             }}
+            aria-label={`Unit: ${row.unit}`}
           >
-            <option value="count">count</option>
-            <option value="lbs">lbs</option>
-          </select>
+            {row.unit}
+          </div>
         </Field>
 
         <Field label="Value">

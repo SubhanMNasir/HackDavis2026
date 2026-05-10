@@ -104,8 +104,9 @@ export default function QuickPickPage() {
     });
   }, [items, activeCategoryId, query]);
 
-  // Group by category. Carry categoryId so each section's "+ Add item" knows
-  // which category to pre-select in the modal.
+  // Group by category. In single-category view, always emit the active
+  // category's section even when empty so the "+ Add item" affordance shows
+  // instead of a generic empty state.
   const grouped = React.useMemo(() => {
     const map = new Map<
       string,
@@ -118,8 +119,13 @@ export default function QuickPickPage() {
       }
       map.get(key)!.items.push(it);
     }
+    if (activeCategoryId !== "all") {
+      const c = categories.find((c) => c.id === activeCategoryId);
+      if (!c) return [];
+      return [map.get(c.id) ?? { categoryId: c.id, categoryName: c.name, items: [] }];
+    }
     return Array.from(map.values());
-  }, [filteredItems]);
+  }, [filteredItems, categories, activeCategoryId]);
 
   const selectedById = React.useMemo(() => {
     const m = new Map<string, SelectedRow>();
@@ -316,7 +322,7 @@ export default function QuickPickPage() {
           <Card className="flex items-center justify-center py-10">
             <Subtle>Loading items…</Subtle>
           </Card>
-        ) : filteredItems.length === 0 ? (
+        ) : grouped.length === 0 ? (
           <EmptyState
             icon={Zap}
             title="No matching items"
@@ -347,22 +353,30 @@ export default function QuickPickPage() {
                     <span>Add item</span>
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                  {g.items.map((it) => {
-                    const sel = selectedById.get(it.id);
-                    return (
-                      <ItemTile
-                        key={it.id}
-                        item={it}
-                        selectedRow={sel}
-                        onAdd={() => addItem(it)}
-                        onRemove={() => removeItem(it.id)}
-                        onChangeQuantity={(n) => updateRow(it.id, { quantity: n })}
-                        onChangeValue={(v) => updateRow(it.id, { estimatedValue: v })}
-                      />
-                    );
-                  })}
-                </div>
+                {g.items.length === 0 ? (
+                  <Card padded>
+                    <Subtle>
+                      No items in this category yet. Tap &quot;Add item&quot; above to create one.
+                    </Subtle>
+                  </Card>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                    {g.items.map((it) => {
+                      const sel = selectedById.get(it.id);
+                      return (
+                        <ItemTile
+                          key={it.id}
+                          item={it}
+                          selectedRow={sel}
+                          onAdd={() => addItem(it)}
+                          onRemove={() => removeItem(it.id)}
+                          onChangeQuantity={(n) => updateRow(it.id, { quantity: n })}
+                          onChangeValue={(v) => updateRow(it.id, { estimatedValue: v })}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </section>
             ))}
           </div>
