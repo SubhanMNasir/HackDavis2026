@@ -65,6 +65,10 @@ export default function QuickPickPage() {
   const [submitting, setSubmitting] = React.useState(false);
   const [showNewCategory, setShowNewCategory] = React.useState(false);
   const [showNewItem, setShowNewItem] = React.useState(false);
+  // When the modal is opened from a per-category "+ Add item" button, this
+  // holds the category to pre-select. Otherwise we fall back to the active
+  // chip (or none if "All" is active).
+  const [newItemCategoryId, setNewItemCategoryId] = React.useState<string | undefined>(undefined);
 
   React.useEffect(() => {
     const ac = new AbortController();
@@ -100,12 +104,18 @@ export default function QuickPickPage() {
     });
   }, [items, activeCategoryId, query]);
 
-  // Group by category.
+  // Group by category. Carry categoryId so each section's "+ Add item" knows
+  // which category to pre-select in the modal.
   const grouped = React.useMemo(() => {
-    const map = new Map<string, { categoryName: string; items: CatalogItem[] }>();
+    const map = new Map<
+      string,
+      { categoryId: string; categoryName: string; items: CatalogItem[] }
+    >();
     for (const it of filteredItems) {
       const key = it.categoryId;
-      if (!map.has(key)) map.set(key, { categoryName: it.categoryName, items: [] });
+      if (!map.has(key)) {
+        map.set(key, { categoryId: it.categoryId, categoryName: it.categoryName, items: [] });
+      }
       map.get(key)!.items.push(it);
     }
     return Array.from(map.values());
@@ -266,9 +276,23 @@ export default function QuickPickPage() {
           onChange={(e) => setQuery(e.target.value)}
         />
 
-        {/* Category chips: All + each seeded category + + New category */}
+        {/* Category chips: + New category (first) → All → each seeded category */}
         <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNewCategory(true)}
+              className="whitespace-nowrap rounded-full px-3 py-1.5 transition"
+              style={{
+                background: "white",
+                color: "var(--brand-green-dark)",
+                border: "1px dashed var(--brand-border)",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              + New category
+            </button>
             <ChipFilter
               active={activeCategoryId === "all"}
               onClick={() => setActiveCategoryId("all")}
@@ -284,35 +308,6 @@ export default function QuickPickPage() {
                 {c.name}
               </ChipFilter>
             ))}
-            <button
-              type="button"
-              onClick={() => setShowNewCategory(true)}
-              className="whitespace-nowrap rounded-full px-3 py-1.5 transition"
-              style={{
-                background: "white",
-                color: "var(--brand-green-dark)",
-                border: "1px dashed var(--brand-border)",
-                fontSize: 13,
-                fontWeight: 500,
-              }}
-            >
-              + New category
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowNewItem(true)}
-              disabled={categories.length === 0}
-              className="whitespace-nowrap rounded-full px-3 py-1.5 transition disabled:opacity-50"
-              style={{
-                background: "white",
-                color: "var(--brand-green-dark)",
-                border: "1px dashed var(--brand-border)",
-                fontSize: 13,
-                fontWeight: 500,
-              }}
-            >
-              + New item
-            </button>
           </div>
         </div>
 
@@ -330,8 +325,28 @@ export default function QuickPickPage() {
         ) : (
           <div className="flex flex-col gap-5">
             {grouped.map((g) => (
-              <section key={g.categoryName} className="flex flex-col gap-2">
-                <H2>{g.categoryName}</H2>
+              <section key={g.categoryId} className="flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-3">
+                  <H2>{g.categoryName}</H2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewItemCategoryId(g.categoryId);
+                      setShowNewItem(true);
+                    }}
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1"
+                    style={{
+                      background: "white",
+                      color: "var(--brand-green-dark)",
+                      border: "1px dashed var(--brand-border)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                    }}
+                  >
+                    <Plus size={12} strokeWidth={1.75} />
+                    <span>Add item</span>
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                   {g.items.map((it) => {
                     const sel = selectedById.get(it.id);
@@ -392,9 +407,14 @@ export default function QuickPickPage() {
 
       <NewItemModal
         isOpen={showNewItem}
-        onClose={() => setShowNewItem(false)}
+        onClose={() => {
+          setShowNewItem(false);
+          setNewItemCategoryId(undefined);
+        }}
         categories={categories}
-        defaultCategoryId={activeCategoryId !== "all" ? activeCategoryId : undefined}
+        defaultCategoryId={
+          newItemCategoryId ?? (activeCategoryId !== "all" ? activeCategoryId : undefined)
+        }
         onCreated={handleNewItemCreated}
       />
     </>
