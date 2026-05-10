@@ -20,7 +20,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      afterSignOutUrl="/sign-in"
+    >
       <html lang="en" className={inter.variable}>
         <body className="antialiased">{children}</body>
       </html>

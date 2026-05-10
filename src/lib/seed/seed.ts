@@ -98,40 +98,14 @@ interface CategorySeed {
   defaultUnit: Unit;
 }
 
+// Mirrors the Wellspring "Donations Needed" flier — one category per
+// program, items listed flat under each. (Re-seeded via reset-catalog.ts
+// after the original spec-style sub-categories were retired.)
 const CATEGORY_SEED: CategorySeed[] = [
-  // Nutritious Meals Program (10)
-  { name: "Canned Goods", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Grains", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Pasta", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Produce", programName: "Nutritious Meals Program", defaultUnit: "lbs" },
-  { name: "Dairy", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Snacks", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Tea and Coffee", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Spreads", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Cereal", programName: "Nutritious Meals Program", defaultUnit: "count" },
-  { name: "Frozen Meals", programName: "Nutritious Meals Program", defaultUnit: "count" },
-
-  // Children's Corner (6)
-  { name: "Baby Consumables", programName: "Children's Corner", defaultUnit: "count" },
-  { name: "Baby Diapers", programName: "Children's Corner", defaultUnit: "count" },
-  { name: "Adult Diapers", programName: "Children's Corner", defaultUnit: "count" },
-  { name: "Baby Food", programName: "Children's Corner", defaultUnit: "count" },
-  { name: "Baby Wipes", programName: "Children's Corner", defaultUnit: "count" },
-  { name: "Kids' Toys", programName: "Children's Corner", defaultUnit: "count" },
-
-  // Women's Wellness / Safety New Services (6)
-  { name: "Hygiene", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-  { name: "Oral Care", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-  { name: "Hair Care", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-  { name: "Feminine Care", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-  { name: "First Aid", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-  { name: "Bedding", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
-
-  // Art of Being Program (4)
-  { name: "Art Supplies", programName: "Art of Being Program", defaultUnit: "count" },
-  { name: "Books", programName: "Art of Being Program", defaultUnit: "count" },
-  { name: "Stationery", programName: "Art of Being Program", defaultUnit: "count" },
-  { name: "Reusable Bags", programName: "Art of Being Program", defaultUnit: "count" },
+  { name: "Nutritious Meals", programName: "Nutritious Meals Program", defaultUnit: "count" },
+  { name: "Children's Corner", programName: "Children's Corner", defaultUnit: "count" },
+  { name: "Women's Wellness", programName: "Women's Wellness / Safety New Services", defaultUnit: "count" },
+  { name: "Art of Being", programName: "Art of Being Program", defaultUnit: "count" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -148,125 +122,340 @@ interface CatalogSeed {
 }
 
 const CATALOG_SEED: CatalogSeed[] = [
+  // ---------------- Nutritious Meals Program ----------------
   {
-    name: "Canned Black Beans",
-    categoryName: "Canned Goods",
+    name: "Tea",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 4.0,
+    aliases: ["tea bags", "herbal tea", "black tea", "green tea", "chamomile"],
+  },
+  {
+    name: "Honey",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 5.0,
+    aliases: ["honey jar", "honey bottle", "raw honey"],
+  },
+  {
+    name: "Fruit Juice",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 3.5,
+    aliases: ["juice", "orange juice", "apple juice", "juice box", "juice carton"],
+  },
+  {
+    name: "Cream Cheese",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 3.5,
+    aliases: ["cream cheese tub", "philadelphia cream cheese"],
+  },
+  {
+    name: "Yogurt",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 1.0,
+    aliases: ["yogurt cup", "bulk yogurt", "greek yogurt", "yogurt container"],
+  },
+  {
+    name: "Olive or Canola Oil",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 7.0,
+    aliases: ["olive oil", "canola oil", "cooking oil", "vegetable oil"],
+  },
+  {
+    name: "Ground Coffee",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["coffee", "coffee grounds", "ground beans", "folgers", "maxwell house"],
+  },
+  {
+    name: "Sugar/Sweetener Packets",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 2.0,
+    aliases: ["sugar packets", "sweetener packets", "splenda", "equal", "stevia", "sugar in the raw"],
+  },
+  {
+    name: "Coffee Stirrers",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 3.0,
+    aliases: ["stirrers", "coffee stirrer", "wood stirrers"],
+  },
+  {
+    name: "Creamer",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 4.0,
+    aliases: ["coffee creamer", "non-dairy creamer", "coffee mate", "half and half"],
+  },
+  {
+    name: "Jams/Jellies",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 4.0,
+    aliases: ["jam", "jelly", "preserves", "marmalade", "smuckers"],
+  },
+  {
+    name: "Oatmeal",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 4.0,
+    aliases: ["oats", "instant oatmeal", "bulk oats", "rolled oats", "quaker oats"],
+  },
+  {
+    name: "Cereal (Low Sugar)",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 4.5,
+    aliases: ["cereal", "low sugar cereal", "cheerios", "corn flakes", "rice krispies"],
+  },
+  {
+    name: "Plastic/Compostable Utensils",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 5.0,
+    aliases: ["utensils", "plastic forks", "plastic spoons", "compostable utensils", "disposable utensils"],
+  },
+  {
+    name: "Paper Towels",
+    categoryName: "Nutritious Meals",
+    programName: "Nutritious Meals Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 2.5,
+    aliases: ["paper towel", "paper towel roll", "kitchen paper", "bounty"],
+  },
+  {
+    name: "Toilet Paper",
+    categoryName: "Nutritious Meals",
     programName: "Nutritious Meals Program",
     defaultUnit: "count",
     estimatedValuePerUnit: 1.5,
-    aliases: ["black beans", "canned beans", "frijoles negros"],
+    aliases: ["tp", "toilet roll", "bathroom tissue", "charmin"],
   },
+
+  // ---------------- Women's Wellness / Safety Net Services ----------------
   {
-    name: "Cans of Soup",
-    categoryName: "Canned Goods",
-    programName: "Nutritious Meals Program",
+    name: "Menstrual Pads",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
     defaultUnit: "count",
-    estimatedValuePerUnit: 2.25,
-    aliases: ["soup can", "canned soup", "tomato soup", "chicken noodle"],
+    estimatedValuePerUnit: 7.0,
+    aliases: ["pads", "sanitary pads", "feminine pads", "period pads", "always pads"],
   },
   {
-    name: "Peanut Butter",
-    categoryName: "Spreads",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "lbs",
-    estimatedValuePerUnit: 3.5,
-    aliases: ["peanut butter jar", "pb"],
-  },
-  {
-    name: "Bananas",
-    categoryName: "Produce",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "lbs",
-    estimatedValuePerUnit: 0.5,
-    aliases: ["banana"],
-  },
-  {
-    name: "Apples",
-    categoryName: "Produce",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "lbs",
-    estimatedValuePerUnit: 1.25,
-    aliases: ["apple", "fuji apple", "gala apple"],
-  },
-  {
-    name: "Rice (5lb bag)",
-    categoryName: "Grains",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 6.0,
-    aliases: ["bag of rice", "white rice", "rice"],
-  },
-  {
-    name: "Pasta",
-    categoryName: "Pasta",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 1.75,
-    aliases: ["spaghetti", "penne", "rotini", "macaroni", "boxed pasta"],
-  },
-  {
-    name: "Granola Bars",
-    categoryName: "Snacks",
-    programName: "Nutritious Meals Program",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 0.75,
-    aliases: ["granola bar", "snack bar", "nature valley"],
-  },
-  {
-    name: "Size 4 Diapers",
-    categoryName: "Baby Diapers",
-    programName: "Children's Corner",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 2.0,
-    aliases: ["diapers size 4", "size4 diapers", "baby diapers size 4"],
-  },
-  {
-    name: "Baby Wipes",
-    categoryName: "Baby Wipes",
-    programName: "Children's Corner",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 4.0,
-    aliases: ["wipes", "infant wipes", "huggies wipes"],
-  },
-  {
-    name: "Toothpaste",
-    categoryName: "Oral Care",
+    name: "Travel-sized Toiletries",
+    categoryName: "Women's Wellness",
     programName: "Women's Wellness / Safety New Services",
     defaultUnit: "count",
     estimatedValuePerUnit: 3.0,
-    aliases: ["colgate", "crest", "toothpaste tube"],
+    aliases: ["travel toiletries", "hotel toiletries", "mini soap", "mini shampoo", "travel kit", "travel conditioner", "travel lotion"],
   },
   {
-    name: "Shampoo",
-    categoryName: "Hair Care",
+    name: "Toothbrushes and Toothpaste",
+    categoryName: "Women's Wellness",
     programName: "Women's Wellness / Safety New Services",
     defaultUnit: "count",
-    estimatedValuePerUnit: 4.5,
-    aliases: ["shampoo bottle", "head and shoulders"],
+    estimatedValuePerUnit: 5.0,
+    aliases: ["toothbrush", "toothpaste", "oral care kit", "colgate", "crest"],
   },
   {
-    name: "Bar Soap",
-    categoryName: "Hygiene",
+    name: "Deodorant",
+    categoryName: "Women's Wellness",
     programName: "Women's Wellness / Safety New Services",
     defaultUnit: "count",
-    estimatedValuePerUnit: 1.0,
-    aliases: ["soap", "dove bar", "bar of soap"],
+    estimatedValuePerUnit: 4.0,
+    aliases: ["antiperspirant", "deo", "stick deodorant", "speed stick", "secret"],
   },
   {
-    name: "Notebook",
-    categoryName: "Stationery",
-    programName: "Art of Being Program",
-    defaultUnit: "count",
-    estimatedValuePerUnit: 2.5,
-    aliases: ["composition book", "spiral notebook", "school notebook"],
-  },
-  {
-    name: "Crayons",
-    categoryName: "Art Supplies",
-    programName: "Art of Being Program",
+    name: "Small Reuse Packets",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
     defaultUnit: "count",
     estimatedValuePerUnit: 2.0,
-    aliases: ["box of crayons", "crayola", "crayon pack"],
+    aliases: ["reuse packets", "refill packets", "small reusable bags"],
+  },
+  {
+    name: "Adult Pull-up Diapers",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 15.0,
+    aliases: ["adult diapers", "depends", "pull-ups adult", "incontinence briefs", "adult underwear"],
+  },
+  {
+    name: "Bed Pads",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 20.0,
+    aliases: ["chux pads", "underpads", "incontinence pads", "bed protector"],
+  },
+  {
+    name: "New Women's Underwear",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["women's underwear", "panties", "undergarments", "ladies underwear"],
+  },
+  {
+    name: "Grocery/Gas Gift Cards $10-$20",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 15.0,
+    aliases: ["gift card", "gas card", "grocery card", "$10 gift card", "$20 gift card", "safeway card", "shell gas card"],
+  },
+  {
+    name: "New Sweat Pants Size L-XXL",
+    categoryName: "Women's Wellness",
+    programName: "Women's Wellness / Safety New Services",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 20.0,
+    aliases: ["sweat pants", "sweatpants", "joggers", "women's pants", "lounge pants"],
+  },
+
+  // ---------------- Art of Being Program ----------------
+  {
+    name: "Yarn",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 5.0,
+    aliases: ["knitting yarn", "crochet yarn", "ball of yarn", "skein"],
+  },
+  {
+    name: "Art Store Gift Cards (Michael's, Blick, JoAnn)",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 25.0,
+    aliases: ["art gift card", "michaels gift card", "joann gift card", "blick gift card", "art supplies gift card"],
+  },
+  {
+    name: "Garment Fabric",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["fabric", "cloth", "sewing fabric", "cotton fabric"],
+  },
+  {
+    name: "Mixed Media/Watercolor Paper 9x12",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 10.0,
+    aliases: ["watercolor paper", "mixed media paper", "art paper", "painting paper", "9x12 paper"],
+  },
+  {
+    name: "Sketchbooks 5x7 & 9x12",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["sketchbook", "art journal", "drawing pad", "sketch pad"],
+  },
+  {
+    name: "Drawing Pencils, Sharpeners & Erasers",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 6.0,
+    aliases: ["pencils", "drawing pencils", "art pencils", "erasers", "sharpeners", "graphite pencils"],
+  },
+  {
+    name: "Adult Coloring Books",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["coloring book", "mandala book", "adult coloring"],
+  },
+  {
+    name: "Fine Point Markers",
+    categoryName: "Art of Being",
+    programName: "Art of Being Program",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 7.0,
+    aliases: ["markers", "fine markers", "sharpie", "fine tip pens", "felt tip pens"],
+  },
+
+  // ---------------- Children's Corner ----------------
+  {
+    name: "Baby Wash",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 5.0,
+    aliases: ["baby body wash", "baby cleanser", "johnson's baby wash", "infant wash"],
+  },
+  {
+    name: "Baby Lotion",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 5.0,
+    aliases: ["johnson's lotion", "infant lotion", "baby moisturizer"],
+  },
+  {
+    name: "New Baby Bottles and Sippy Cups",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["baby bottle", "sippy cup", "infant bottle", "tommee tippee", "dr browns"],
+  },
+  {
+    name: "New Baby Onesies",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 8.0,
+    aliases: ["onesie", "baby onesie", "infant onesie", "bodysuit", "newborn onesie"],
+  },
+  {
+    name: "Baby Bibs",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 6.0,
+    aliases: ["bib", "infant bib", "drool bib", "feeding bib"],
+  },
+  {
+    name: "Disposable Diapers (Newborn, 4-6, Pull-ups)",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 20.0,
+    aliases: ["diapers", "baby diapers", "newborn diapers", "size 4 diapers", "size 5 diapers", "size 6 diapers", "pull-ups", "huggies", "pampers"],
+  },
+  {
+    name: "Baby Formula",
+    categoryName: "Children's Corner",
+    programName: "Children's Corner",
+    defaultUnit: "count",
+    estimatedValuePerUnit: 25.0,
+    aliases: ["infant formula", "similac", "enfamil", "formula powder", "formula can"],
   },
 ];
 
@@ -475,11 +664,26 @@ async function seedAuditEvents(): Promise<number> {
 }
 
 async function run() {
+  const reset = process.argv.includes("--reset-catalog");
+
   // eslint-disable-next-line no-console
-  console.log("[seed] connecting to MongoDB...");
+  console.log(`[seed] connecting to MongoDB${reset ? " (reset-catalog mode)" : ""}...`);
   await connectMongo();
   // eslint-disable-next-line no-console
   console.log("[seed] connected.");
+
+  if (reset) {
+    // Soft-archive the entire catalog before re-seeding. The upserts below
+    // will re-activate any rows whose (programId, name) or (categoryId,
+    // name) keys still match the new seed; the rest stay archived.
+    // Donations/AuditEvents are independent collections — untouched.
+    const cats = await Category.updateMany({}, { $set: { active: false } });
+    const items = await CatalogItem.updateMany({}, { $set: { active: false } });
+    // eslint-disable-next-line no-console
+    console.log(
+      `[seed] reset: archived ${cats.modifiedCount} categories + ${items.modifiedCount} items`,
+    );
+  }
 
   const programIds = await seedPrograms();
   // eslint-disable-next-line no-console
@@ -493,9 +697,12 @@ async function run() {
   // eslint-disable-next-line no-console
   console.log(`[seed] catalog items: ${catalogCount}`);
 
-  const auditCount = await seedAuditEvents();
-  // eslint-disable-next-line no-console
-  console.log(`[seed] audit events: ${auditCount}`);
+  // Skip demo audit-event seeding in reset mode — preserves real history.
+  if (!reset) {
+    const auditCount = await seedAuditEvents();
+    // eslint-disable-next-line no-console
+    console.log(`[seed] audit events: ${auditCount}`);
+  }
 
   // Drop the in-memory categories cache so any concurrent dev server picks
   // up the freshly-seeded categories on the next /api/recognize call.
