@@ -9,6 +9,8 @@ Wellspring is a small nonprofit that needs to replace a paper-based donation log
 - **Most items have no barcode** — meal program food especially. Produce/food is logged by **weight (lbs)**, hygiene/diapers by **count**
 - **Multiple volunteers logging simultaneously** during giveaway days
 - They have a **fixed list of commonly-accepted items** that should seed the catalog
+- **Add / rename / soft-archive donation categories at runtime** — Jessica's email asks for this (e.g. spinning up a "Dog Leashes" category on the spot); inline from AI Review, no separate admin screen
+- **Audit-log every write** so any volunteer can see who logged / edited / archived what — replaces the original "Recent" tab with a "History" team feed
 
 **Constraints baked into this plan:**
 - 24-hour build window
@@ -19,6 +21,7 @@ Wellspring is a small nonprofit that needs to replace a paper-based donation log
 - Auth: Clerk (email + password with reset)
 - Primary input: **AI photo recognition + quick-pick from seeded catalog**, manual fallback
 - Reports: **dashboard + CSV export** (no scheduled emails for MVP)
+- **Timezone**: all date bucketing is in `America/Los_Angeles` (Wellspring's TZ); wire format stays UTC ISO
 
 **Goal:** Ship a polished, mobile-friendly MVP that demos cleanly: a volunteer signs in, snaps a photo of a pile of donations, AI fills the form, they confirm, and a report tab shows totals + tax values for any date range.
 
@@ -40,6 +43,7 @@ Boring, well-documented choices. The team is learning the stack — every "we'll
 | AI vision | **Gemini API**, `gemini-2.5-flash` (`@google/genai` SDK) | Fast, generous free tier, native multimodal. Use `responseSchema` for strict JSON output — better than prompt-engineering JSON. Counts toward Gemini prize track. |
 | File upload | Plain `<input type="file" capture="environment">` | Native camera capture on mobile, no library. Upload to Vercel Blob or pass directly as base64/inlineData to Gemini. |
 | Charts (stretch) | **Recharts** | Only if there's time for the dashboard polish pass. |
+| Timezone helper | **date-fns-tz** (or `@date-fns/tz`) | Shared `America/Los_Angeles` bucketing on both client and server. Deterministic preset boundaries. |
 | Hosting | **Vercel** | One-click deploy from Git, free tier, env vars in dashboard. |
 
 **Anti-recommendations:** No Redux/Zustand (use React Query or server components). No tRPC (overkill, learning curve). No custom design system (shadcn only). No microservices.
@@ -82,17 +86,18 @@ Boring, well-documented choices. The team is learning the stack — every "we'll
 1. Volunteer taps "Log donations" → "📷 Photo"
 2. Native camera opens (`<input capture="environment">`)
 3. Image uploaded as base64 to `/api/recognize`
-4. Server calls Gemini 2.5 Flash with `responseSchema` enforcing strict JSON output
-5. Server matches each suggested item against `itemCatalog` (case-insensitive name + alias matching), filling in `defaultUnit` and `estimatedValuePerUnit`
-6. Returns array of `{itemId, name, suggestedQty, unit, estValue}` to client
-7. Volunteer sees an editable list, fixes anything wrong, taps "Save all"
-8. Client posts to `/api/donations` (single bulk insert)
+4. Server reads active categories list (cached 60s) and builds Gemini's `responseSchema.enum` *dynamically* — newly-created categories are immediately suggestable
+5. Server calls Gemini 2.5 Flash with the dynamic `responseSchema`
+6. Server matches each suggested item against `itemCatalog` (case-insensitive name + alias matching), filling in `categoryId`, `categoryName`, `programName`, `defaultUnit`, and `estimatedValuePerUnit`. If `matchedCount === 0`, returns empty result — frontend bails to Log Home with a toast.
+7. Returns `{items, rawCount, matchedCount}` to client
+8. Volunteer sees an editable list with an inline `CategoryDropdown` per row (footer "+ New category" calls `POST /api/categories` and re-binds), fixes anything wrong, taps "Save all"
+9. Client posts to `/api/donations` (single bulk insert) — server denormalizes `categoryName` + `programName` from `categoryId` and emits a `donation.created` audit event per row
 
 ---
 
 ## MongoDB Schema
 
-Three collections. Aggressive denormalization on `donations` so reports never need `$lookup` (faster + simpler aggregation pipelines).
+Six collections. Aggressive denormalization on `donations` so reports stay simple. The `events` collection is append-only — no in-place updates or deletes.
 
 ### `users`
 Mirror of Clerk users for joining/denormalization.
@@ -105,16 +110,45 @@ Mirror of Clerk users for joining/denormalization.
 }
 ```
 
+### `programs`
+Seeded once with the 4 programs from Jessica's email. Never written by the app.
+```js
+{
+  _id: ObjectId,
+  name: String,                       // "Nutritious Meals Program"
+  slug: String,                       // "nutritious-meals"
+  sortOrder: Number,
+}
+```
+
+### `categories`
+Seeded with ~25 categories from Jessica's email. Runtime CRUD via `/api/categories` (POST/PATCH/DELETE).
+```js
+{
+  _id: ObjectId,
+  name: String,                       // "Tea and Coffee"
+  programId: ObjectId,                // ref to programs
+  programName: String,                // denormalized
+  defaultUnit: String,                // "count" | "lbs" | "oz"
+  active: Boolean,                    // soft-delete flag
+  createdBy: String,                  // Clerk userId
+  createdAt: Date,
+  updatedAt: Date,
+}
+```
+
 ### `itemCatalog`
 Seeded from Jessica's accepted-items list before the hackathon starts.
 ```js
 {
   _id: ObjectId,
   name: String,                       // "Canned Black Beans"
-  category: String,                   // "Canned Goods" | "Produce" | "Hygiene" | "Diapers" | "Meal Program" | "Other"
+  categoryId: ObjectId,               // ref to categories
+  categoryName: String,               // denormalized
+  programName: String,                // denormalized
   defaultUnit: String,                // "count" | "lbs" | "oz"
   estimatedValuePerUnit: Number,      // USD
-  aliases: [String],                  // for AI matching: ["black beans", "canned beans"]
+  aliases: [String],                  // for AI fuzzy-matching: ["black beans", "canned beans"]
   active: Boolean,                    // hide from pickers without losing history
   createdAt: Date,
   updatedAt: Date,
@@ -127,17 +161,36 @@ Seeded from Jessica's accepted-items list before the hackathon starts.
   _id: ObjectId,
   loggedBy: String,                   // Clerk user ID
   loggedByName: String,               // denormalized
-  itemId: ObjectId,                   // ref to itemCatalog
+  itemId: ObjectId | null,            // ref to itemCatalog; null when not in catalog
   itemName: String,                   // denormalized — survives catalog edits
-  category: String,                   // denormalized
-  quantity: Number,
+  categoryId: ObjectId,               // ref to categories
+  categoryName: String,               // snapshot — survives renames (CSV uses this)
+  programName: String,                // snapshot
+  quantity: Number,                   // integer for "count", up to 1dp for lbs/oz
   unit: String,                       // "count" | "lbs" | "oz"
-  estimatedValue: Number,             // total $ for this entry, editable at log time
+  estimatedValue: Number,             // total $ for this entry
   source: String,                     // "photo_ai" | "quick_pick" | "manual" | "barcode"
-  photoUrl: String?,                  // if photo flow used (optional, Vercel Blob)
-  notes: String?,
-  donatedAt: Date,                    // when donation was received (defaults to now, editable)
-  createdAt: Date,                    // when logged in system (immutable)
+  photoUrl: String | null,            // MVP: always null (Vercel Blob deferred)
+  notes: String | null,
+  donatedAt: Date,                    // when received (Manual Entry can backdate; AI/Quick Pick use server now)
+  createdAt: Date,                    // immutable
+  updatedAt: Date,                    // bumped on PATCH
+  deleted: Boolean,                   // soft-delete flag (default false)
+}
+```
+
+### `events` (audit log, append-only)
+Every donation/category/item write emits one row via `lib/audit.ts`.
+```js
+{
+  _id: ObjectId,
+  type: String,                       // AuditEventType (see CONTRACTS.md §3)
+  actorId: String,                    // Clerk userId
+  actorName: String,                  // denormalized
+  targetId: ObjectId,                 // donation/category/item id
+  targetLabel: String,                // human label, e.g. "Size 4 Diapers"
+  summary: String,                    // pre-formatted display string
+  createdAt: Date,
 }
 ```
 
@@ -145,25 +198,38 @@ Seeded from Jessica's accepted-items list before the hackathon starts.
 ```js
 // donations
 { donatedAt: -1 }                            // primary date-range scans
-{ category: 1, donatedAt: -1 }               // "diapers this month"
+{ categoryId: 1, donatedAt: -1 }             // "diapers this month"
+{ programName: 1, donatedAt: -1 }            // program-grouped reports
 { itemId: 1, donatedAt: -1 }                 // "this specific item over time"
 { loggedBy: 1, createdAt: -1 }               // "my recent entries"
+{ deleted: 1, donatedAt: -1 }                // active-only queries are the common path
 
 // itemCatalog
-{ category: 1, active: 1 }                   // picker queries
+{ categoryId: 1, active: 1 }                 // picker queries
 { name: "text", aliases: "text" }            // AI fuzzy matching
+
+// categories
+{ programId: 1, active: 1 }                  // picker grouped by program
+{ name: 1, programId: 1 }                    // unique-within-program (partial filter on active: true)
+
+// events
+{ createdAt: -1 }                            // History feed default sort
+{ actorId: 1, createdAt: -1 }                // filter by who
+{ type: 1, createdAt: -1 }                   // filter by event type
 ```
 
 ### Reports aggregation pattern
+Group by `categoryId` (so renames consolidate cleanly) and `$lookup` the current category name. Always exclude soft-deleted donations.
 ```js
 db.donations.aggregate([
-  { $match: { donatedAt: { $gte: start, $lte: end } } },
+  { $match: { deleted: { $ne: true }, donatedAt: { $gte: start, $lte: end } } },
   { $group: {
-      _id: { itemName: "$itemName", unit: "$unit" },
+      _id: { categoryId: "$categoryId", itemName: "$itemName", unit: "$unit" },
       totalQuantity: { $sum: "$quantity" },
       totalValue:    { $sum: "$estimatedValue" },
       entryCount:    { $sum: 1 },
   }},
+  { $lookup: { from: "categories", localField: "_id.categoryId", foreignField: "_id", as: "cat" } },
   { $sort: { totalValue: -1 } },
 ])
 ```
@@ -175,25 +241,26 @@ db.donations.aggregate([
 In priority order. Anything below the line is stretch.
 
 1. **Auth** — sign up, sign in, password reset (Clerk drop-in components)
-2. **Seeded item catalog** — load Jessica's list with categories, default units, $ values
+2. **Seeded programs + categories + item catalog** — 4 programs, ~25 categories, Jessica's accepted-item list; loaded by `seed-programs.ts`, `seed-categories.ts`, and the existing item seeder
 3. **Quick-pick entry** — browse catalog by category, tap item, set quantity, save (the workhorse path)
-4. **AI photo entry** — snap photo → AI suggests items → review/edit → bulk save (the demo moment)
-5. **Manual entry fallback** — for items not in catalog
+4. **AI photo entry** — snap photo → AI suggests items → review/edit → bulk save (the demo moment); bails to Log Home with a toast when `matchedCount === 0`
+5. **Manual entry fallback** — for items not in catalog; only screen with a backdate-able `donatedAt` picker
 6. **Per-entry editable** — unit and $ value can be overridden at log time
-7. **Reports dashboard** — date range picker (presets: this month, last month, Q2, YTD, custom) + totals table by item with $ subtotals and grand total
-8. **CSV export** — one-click from any report view
-9. **Recent entries** — so a volunteer can see/verify their own work this session
-10. **Mobile-first responsive layout** — bottom nav bar on mobile, sidebar on iPad
+7. **Inline category CRUD from AI Review** — `CategoryDropdown` with footer "+ New category"; rename + soft-archive available too
+8. **Reports dashboard** — date range picker (presets: this month, last month, Q2, YTD, custom; computed in `America/Los_Angeles`) + totals table by item with $ subtotals and grand total; supports `groupBy=item|category|program`
+9. **CSV export** — one-click from any report view; columns include `Program`; `Source` uses human labels
+10. **Edit / soft-delete past donations** — `PATCH/DELETE /api/donations/:id`, only original logger
+11. **History feed** — every volunteer sees every write event (donations + category writes) with actor names, grouped Today / Yesterday / older (Pacific)
+12. **Mobile-first responsive layout** — bottom nav bar on mobile (Log / Reports / **History** / Profile), sidebar on iPad
 
 ### Stretch (in attack order if time permits)
 1. Barcode scanning fast-lane (html5-qrcode) — only for barcoded categories
 2. PDF export for tax filing (react-pdf)
-3. Edit / delete past entries (with audit trail field)
-4. Charts on dashboard (Recharts: top items bar chart, daily trend line)
-5. Admin screen to manage catalog (add/edit/retire items)
-6. Scheduled email reports (Vercel Cron + Resend)
-7. Donor tracking
-8. Multi-language UI
+3. Charts on dashboard (Recharts: top items bar chart, daily trend line)
+4. Item-level admin screen (add/edit/retire individual catalog items, beyond the per-row inline create that AI Review provides)
+5. Scheduled email reports (Vercel Cron + Resend)
+6. ~~Donor tracking~~ — cut, see Build Order
+7. ~~Multi-language UI~~ — cut, see Build Order
 
 ---
 
@@ -203,33 +270,40 @@ Roles are suggestions — swap if someone's stronger in another area. The point 
 
 ### Hours 0–2 — Setup (everyone in parallel, get unblocked)
 - **A**: `npx create-next-app` + Clerk + deploy to Vercel. **Skeleton must be live with auth working by hour 2.**
-- **B**: MongoDB Atlas cluster + connection string + mongoose models + seed script that loads Jessica's items
-- **C**: Tailwind + shadcn install, mobile shell (header, bottom tab bar, route stubs for /log, /reports, /me)
+- **B**: MongoDB Atlas cluster + connection string + mongoose models for `User`, `Program`, `Category`, `ItemCatalog`, `Donation`, `Event` + seed scripts (`seed-programs.ts`, `seed-categories.ts`, `seed-catalog.ts`).
+- **C**: Tailwind + shadcn install, mobile shell (header, bottom tab bar with `Log` / `Reports` / `History` / `Profile`, route stubs for `/log`, `/reports`, `/history`)
 - **D**: Gemini API key from Google AI Studio, prove out the vision call in a small standalone script using `@google/genai` + `responseSchema`. **Do not skip this.** Iterate until it returns clean structured output for 3 sample photos.
 
 ### Hours 2–8 — Core entry flow
-- **A**: Wire Clerk → mirror user in Mongo on first sign-in (webhook or just-in-time on first request)
-- **B**: `POST /api/donations`, `GET /api/donations?mine=true`, `GET /api/catalog`
+- **A**: Wire Clerk → mirror user in Mongo on first sign-in (just-in-time on first authenticated API call). Build the fetch wrapper that redirects to `/sign-in` on 401.
+- **B**: `POST /api/donations`, `GET /api/donations`, `GET /api/catalog`, `GET /api/programs`, `GET /api/categories`. Wire `lib/audit.ts` and emit `donation.created` events.
 - **C**: Quick-pick UI — browse catalog by category, tap → quantity stepper → save. This is the workhorse, polish it.
-- **D**: Photo capture component (`<input capture="environment">`) + `/api/recognize` endpoint that calls Gemini and matches against catalog
+- **D**: Photo capture component (`<input capture="environment">`) + `/api/recognize` endpoint that calls Gemini and matches against catalog. Build `lib/categories-cache.ts` for the dynamic enum.
 
-### Hours 8–14 — AI integration + reports
-- **A**: AI review/confirm screen — receives `/api/recognize` output, renders editable rows, bulk-save to `/api/donations`
-- **B**: Aggregation pipeline + `GET /api/reports?from=&to=`
-- **C**: Reports page — date range picker (presets + custom), totals table, grand total $ value
-- **D**: CSV export (server-side, returns `text/csv`)
+### Hours 8–14 — AI integration + reports + audit/CRUD
+- **A**: AI review/confirm screen — receives `/api/recognize` output, renders editable rows, bulk-save to `/api/donations`. Includes the inline `CategoryDropdown` component (with "+ New category" modal that calls `POST /api/categories`).
+- **B**: Aggregation pipeline + `GET /api/reports?from=&to=&groupBy=`. Plus `POST/PATCH/DELETE /api/categories`, `PATCH /api/donations/:id`, `DELETE /api/donations/:id` (soft), `GET /api/events`. Each write emits the right audit event via `lib/audit.ts`. Cache invalidation on category writes.
+- **C**: Reports page — date range picker (presets + custom, all in `America/Los_Angeles` via `lib/timezone.ts`), totals table, grand total $ value.
+- **D**: CSV export (server-side, returns `text/csv`) — column order `Date,Item,Category,Program,Quantity,Unit,Estimated Value,Source,Logged By,Notes`; human source labels; Pacific filename.
 
 ### Hours 14–20 — Polish + integration
 - All: bug fixes, **test on actual phones** (multiple devices simultaneously), error states, loading states, success toasts
-- **A** or **D** (whoever's freed up): "My recent entries" list with edit (stretch) or at least delete-this-session
-- **B**: Realistic demo data seed (so the dashboard isn't empty during judging)
-- **C**: Empty states, error states, mobile polish pass
+- **A**: Build `/history` page (replaces `/me`) — feed of `AuditEvent`s grouped Today / Yesterday / older (Pacific). Tap-to-edit/delete on own donation events.
+- **B**: Realistic demo data seed (so dashboard + History aren't empty during judging) — multiple actors, multiple event types.
+- **C**: Empty states, error states, mobile polish pass. Verify the AI Review bail-out toast renders cleanly.
+- **D**: Hardening — Gemini fallback toasts, downscale large images client-side before posting, base64 prefix tolerance.
 
 ### Hours 20–24 — Demo prep
 - Test on actual phones, multiple devices logging at once
-- Run through demo script 3+ times
+- Run through demo script 3+ times — including the *create-a-new-category-on-the-fly* demo moment
 - Fix only critical bugs — resist scope creep
 - Push final deploy and verify on the URL you'll demo from
+
+### Officially cut from stretch (no longer in scope)
+- Donor tracking
+- Multi-language UI
+
+These cuts make room for the audit log + History + category CRUD work absorbed into Hours 8–14 and 14–20.
 
 ---
 
@@ -243,34 +317,50 @@ Roles are suggestions — swap if someone's stronger in another area. The point 
   /log/photo/page.tsx                      # camera capture + AI review
   /log/quick-pick/page.tsx                 # browse-and-tap
   /reports/page.tsx                        # date range + totals + CSV button
-  /me/page.tsx                             # recent entries
-  /api/donations/route.ts                  # POST (bulk), GET (mine)
+  /history/page.tsx                        # team audit feed (replaces /me)
+  /api/donations/route.ts                  # POST (bulk), GET
+  /api/donations/[id]/route.ts             # PATCH, DELETE (soft)
   /api/catalog/route.ts                    # GET
-  /api/recognize/route.ts                  # POST image → Claude Vision → matched items
+  /api/programs/route.ts                   # GET
+  /api/categories/route.ts                 # GET, POST
+  /api/categories/[id]/route.ts            # PATCH, DELETE (soft)
+  /api/recognize/route.ts                  # POST image → Gemini → matched items
   /api/reports/route.ts                    # GET aggregations
   /api/reports/csv/route.ts                # GET CSV
+  /api/events/route.ts                     # GET audit feed
 /lib
   /db.ts                                   # mongoose connection (cached)
   /models/User.ts
+  /models/Program.ts
+  /models/Category.ts
   /models/ItemCatalog.ts
   /models/Donation.ts
-  /vision.ts                               # Gemini 2.5 Flash call + responseSchema
+  /models/Event.ts
+  /vision.ts                               # Gemini 2.5 Flash call + dynamic responseSchema
   /catalog-match.ts                        # fuzzy match AI output → catalog items
+  /categories-cache.ts                     # 60s in-memory cache of active categories for AI schema
+  /audit.ts                                # emit-event helper called from every write endpoint
+  /timezone.ts                             # shared "America/Los_Angeles" constant + helpers
 /scripts
-  /seed-catalog.ts                         # loads Jessica's list
-  /seed-demo-data.ts                       # realistic donations for demo
+  /seed-programs.ts                        # 4 programs from Jessica's email
+  /seed-categories.ts                      # ~25 categories grouped by program
+  /seed-catalog.ts                         # loads Jessica's item list
+  /seed-demo-data.ts                       # realistic donations + audit events for demo
 ```
 
 ---
 
 ## Gemini Vision Call (sketch)
 
-Use `gemini-2.5-flash` with `responseSchema` so the model is *forced* to return valid structured data — no JSON parsing guesswork.
+Use `gemini-2.5-flash` with `responseSchema` so the model is *forced* to return valid structured data — no JSON parsing guesswork. The `category` enum is **read from the DB at request time** (cached 60s) so newly-created categories are immediately suggestable.
 
 ```ts
 import { GoogleGenAI, Type } from "@google/genai";
+import { getCategoriesCache } from "@/lib/categories-cache";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const activeCategories = await getCategoriesCache();   // 60s in-memory
 
 const responseSchema = {
   type: Type.OBJECT,
@@ -281,9 +371,9 @@ const responseSchema = {
         type: Type.OBJECT,
         properties: {
           name:               { type: Type.STRING },
-          category:           { type: Type.STRING, enum: ["Canned Goods","Produce","Hygiene","Diapers","Meal Program","Other"] },
+          category:           { type: Type.STRING, enum: activeCategories.map(c => c.name) },
           estimated_quantity: { type: Type.NUMBER },
-          unit:               { type: Type.STRING, enum: ["count","lbs"] },
+          unit:               { type: Type.STRING, enum: ["count","lbs","oz"] },
         },
         required: ["name","category","estimated_quantity","unit"],
       },
@@ -303,7 +393,7 @@ const result = await ai.models.generateContent({
 const { items } = JSON.parse(result.text);
 ```
 
-Then on the server, fuzzy-match each `name` against `itemCatalog.name + aliases` (case-insensitive substring or simple Levenshtein). On match, replace with the catalog item's canonical `name`, `defaultUnit`, and `estimatedValuePerUnit`. On miss, keep AI suggestion as a manual entry the volunteer can finalize.
+Then on the server, fuzzy-match each `name` against `itemCatalog.name + aliases` (case-insensitive substring or simple Levenshtein). On match: replace with the catalog item's canonical `name`, `categoryId`, `categoryName`, `programName`, `defaultUnit`, and `estimatedValuePerUnit`. On miss: keep AI's `name`/`categoryName`/`unit`/`quantity`, set `itemId: null` + `categoryId: null`, mark `warning: "not_in_catalog"`. Cache invalidates on any successful `POST/PATCH/DELETE /api/categories`.
 
 ---
 
@@ -313,13 +403,18 @@ Before declaring done, run through this on **actual phones**:
 
 1. Two volunteers sign in on two different phones simultaneously.
 2. Volunteer A: tap Photo → snap a photo of a pile of mixed donations → AI suggestions appear → edit one item, delete one, accept the rest → Save all.
-3. Volunteer B (at the same time): use Quick-pick → tap "Diapers" category → tap "Size 4 diapers" → set count to 24 → Save.
-4. Volunteer B: Manual entry → "Used baby crib" → set $25 value → Save.
+3. Volunteer B (at the same time): use Quick-pick → tap "Baby Consumables" category → tap "Size 4 Diapers" → set count to 24 → Save.
+4. Volunteer B: Manual entry → "Used baby crib" → set $25 value → date received = yesterday → Save.
 5. Both volunteers: open Reports → "This month" preset → both volunteers' entries appear, totals correct, grand $ value correct.
 6. Pick a custom range that excludes today → entries disappear from totals.
-7. Click "Export CSV" → file downloads → opens cleanly in Excel/Sheets with all columns.
+7. Click "Export CSV" → file downloads → opens cleanly in Excel/Sheets with all columns including `Program`.
 8. Test password reset email actually arrives (Clerk dashboard → trigger from sign-in screen).
-9. Sign out → sign back in → entries persist, "My recent" shows correct user's entries only.
+9. Sign out → sign back in → entries persist; History shows both volunteers' entries with correct names.
+10. Volunteer A creates "Dog Leashes" (program: Other / Misc) inline from AI Review → it shows up in the next AI run's category enum and in Quick Pick once an item is added under it.
+11. Volunteer A renames "Diapers" → "Adult Diapers" → CSV for past donations still says "Diapers"; Reports group both names under the renamed category via `categoryId`.
+12. Volunteer B opens History → sees A's rename event and recent donations from both volunteers, each with the correct actor name + Pacific timestamp.
+13. Volunteer A edits one of their own past donations → `donations` row updates; History gets a `donation.updated` row showing the diff.
+14. Volunteer A tries to PATCH or DELETE Volunteer B's donation → 403.
 
 If any of these break, that's a P0 bug for the final 4-hour window.
 
@@ -336,3 +431,6 @@ If any of these break, that's a P0 bug for the final 4-hour window.
 | Time blown on prompt engineering | Cap it at 2 hours. If accuracy is mediocre at hour 4, ship it — review/edit step covers the gap. |
 | Three people committing at once breaks main | Branch per feature, merge often, one person rebases when needed. |
 | Demo-day wifi at venue is bad | Wifi was assumed in MVP scope. If hackathon venue has bad wifi, budget 1h hotfix at hour 22 to add a "queue and retry" wrapper around `/api/donations`. |
+| Dynamic Gemini schema gets stale after a volunteer creates a new category | 60s in-memory cache in `lib/categories-cache.ts` + invalidate on any successful POST/PATCH/DELETE to `/api/categories`. |
+| Audit log scope creep eats build time | Cap initial event types at 4 (`donation.created` / `updated` / `deleted`, `category.renamed`); add `category.created` / `archived` and `item.*` only if Hours 14–20 has slack. |
+| Mongo `$lookup` perf on reports | Free-tier M0 is fine for hackathon volume (~hundreds of donations). Don't optimize until measured. |

@@ -40,7 +40,7 @@ The Wellspring Women's Center logo is a circular badge stored at `src/imports/im
 
 - **Mobile frame:** 390 × 844 (iPhone 14). Design every screen at this size first.
 - **Tablet frame:** 1024 × 768 iPad landscape (only for the Reports dashboard variant).
-- Persistent **bottom tab bar** on mobile (4 tabs): `Log`, `Reports`, `Recent`, `Profile`. Active tab is brand green with filled icon; inactive is slate with outlined icon.
+- Persistent **bottom tab bar** on mobile (4 tabs): `Log`, `Reports`, `History`, `Profile`. Active tab is brand green with filled icon; inactive is slate with outlined icon.
 - Persistent **top app bar** on mobile: 56px tall, white background, subtle bottom border, screen title centered, optional left back chevron, optional right action.
 
 Build a debug navigator in `App.tsx` that shows all screens at once (or filters to one) — wrap each screen in a phone-shaped frame with `borderRadius: 36, width: 390, height: 844`.
@@ -54,10 +54,12 @@ Build these once and reuse:
 - `WellspringLogo` — circular logo image, configurable size
 - `PhoneFrame` / `TabletFrame` — frame wrappers for mockup display
 - `TopAppBar` — variants: default, with back chevron, with right action
-- `BottomTabBar` — 4 tabs, active state per tab
+- `BottomTabBar` — 4 tabs (Log / Reports / History / Profile), active state per tab
 - `PrimaryButton` — amber, full-width
 - `SecondaryButton` — green outline
 - `CategoryPill` — slate / green / amber tone variants
+- `CategoryDropdown` — picker with active categories grouped by program; footer item "+ New category" opens an inline modal (name input + program select + default-unit segment)
+- `EventRow` — history feed row: actor avatar (initials), bold actor name + action verb, target label, timestamp on the right; small icon chip for event type (📷 / ⚡ / ✏️ for donation events, 🏷️ for category events)
 - `Field` — labeled input row (text, number, with prefix `$`, with caret)
 - `StatCard` — large number + label
 
@@ -96,15 +98,20 @@ Build these once and reuse:
 - Sticky bottom: amber "Open Camera" full-width button.
 
 ### 4. AI Review (the hero screen — make this great)
+- **Bail-out behavior** (assumed by the data, not rendered as a separate screen): if `/api/recognize` returns `matchedCount === 0`, this screen is **never rendered** — frontend toasts "Could not match item to catalog. Try again or manually select." and routes back to Log Home. The mockup shows the populated success case.
 - Top app bar: back chevron, title "Review items", right action "Save all" (green text).
 - Thumbnail strip at top: ~80px tall rounded gradient placeholder labeled "📷 Captured photo".
 - Banner: green-tinted background with info icon — "AI found 6 items — review and edit before saving."
 - Vertical list of editable item cards. Each card:
   - Item name (bold) e.g. "Canned Black Beans"
-  - Category pill (e.g. "Canned Goods")
+  - `CategoryDropdown` showing the assigned category (tap to change); footer item "+ New category" opens an inline modal: name input + program select (4 fixed options: Nutritious Meals / Children's Corner / Women's Wellness / Art of Being) + default-unit segment. On save, the new category is selected for this row and now appears in every other row's dropdown too.
   - Quantity stepper (− N +), unit dropdown (count / lbs / oz), estimated $ field
   - Trash icon top-right
-- Show 4 cards. One has an amber "Edited" tag. One has a red "Not in catalog" warning chip with `AlertTriangle` icon.
+- **Three chip variants** (the brand-coded states):
+  - **Category pill / dropdown** — neutral / brand green; always present; comes from server (canonical category).
+  - **"Edited"** — amber; client-only, appears when the volunteer has changed any field on the card from the AI's original suggestion.
+  - **"Not in catalog"** — red, with `AlertTriangle` icon; only on cards where `warning === "not_in_catalog"` (partial-miss case).
+- Show 4 cards. One has an amber "Edited" tag. One has a red "Not in catalog" warning chip.
 - Sticky bottom: "6 items · $84.50 estimated" + amber "Save all".
 
 ### 5. Quick Pick
@@ -130,28 +137,37 @@ Build these once and reuse:
 - Bottom tab bar (Reports active).
 
 ### 8. Reports — iPad (1024 × 768, single frame)
-- Left sidebar nav (240px): Wellspring logo + name top, nav items (Log, **Reports** active, Recent, Profile), divider, "Sign out", user chip ("Jessica M. · Volunteer") at bottom.
+- Left sidebar nav (240px): Wellspring logo + name top, nav items (Log, **Reports** active, History, Profile), divider, "Sign out", user chip ("Jessica M. · Volunteer") at bottom.
 - Active nav item: green tint bg `#F7FEE7`, brand-dark text, weight 600.
 - Main pane: same data as mobile reports but wider — date presets in one row, **4 stat cards** (Total value, Entries, Top item, Top category), then by-item table with full columns (Item, Category, Quantity, Avg $, Total $, Entries).
 - Top-right card: simple bar chart placeholder showing top 5 items as horizontal bars (use plain divs, not recharts).
 
-### 9. Recent Entries
-- Top app bar: title "Recent", right filter icon.
-- Section header "Today" with cards. Each card:
-  - Item name + small source badge (📷 AI, ⚡ Quick, ✏️ Manual)
-  - Sub-row: quantity + unit · $value · timestamp ("2m ago")
-  - Faint trash icon on right edge (static swipe-affordance hint)
-- Section "Yesterday" with 2–3 dimmer rows.
-- Also render a separate empty-state card alongside: green tint icon circle, "No donations yet today", amber "Log first donation" button.
-- Bottom tab bar (Recent active).
+### 9. History
+- Top app bar: title "History", right filter icon.
+- Section headers: "Today" / "Yesterday" / older date headers. **All bucketing is in `America/Los_Angeles`** (Wellspring's TZ), regardless of the volunteer's device timezone.
+- Each row is an `EventRow` (actor avatar with initials, bold actor name + action verb, target label, timestamp on the right; small icon chip indicating event type — 📷 / ⚡ / ✏️ for donation events, 🏷️ for category events).
+- Show 5 sample events under "Today":
+  1. "Jessica M. logged Size 4 Diapers — 24 count · $48.00 · 2m ago" (📷 AI badge)
+  2. "Maria T. logged Bananas — 3 lbs · $1.50 · 8m ago" (⚡ Quick badge)
+  3. "Jessica M. renamed Diapers → Adult Diapers — 14m ago" (🏷️ category badge)
+  4. "Maria T. created category Dog Leashes — 22m ago" (🏷️ category badge)
+  5. "Alex K. archived Yarn — 1h ago" (🏷️ category badge)
+- Section "Yesterday" with 2–3 dimmer rows (mix of donation and category events).
+- Tap a donation event → opens an edit/delete sheet (only shown if you're the original logger). Tap a category event → no-op for MVP (info only).
+- Bottom tab bar (History active).
 
 ---
 
 ## Sample Data (use verbatim — no Lorem Ipsum)
 
-- Categories: `Canned Goods`, `Produce`, `Hygiene`, `Diapers`, `Meal Program`, `Other`
-- Items: `Canned Black Beans`, `Peanut Butter (16oz)`, `Bananas`, `Toothpaste`, `Size 4 Diapers`, `Rice (5lb bag)`, `Shampoo`, `Apples`, `Pasta`, `Granola Bars`
-- Volunteer: `Jessica M.` (initials JM)
+- Programs (4): `Nutritious Meals Program`, `Children's Corner`, `Women's Wellness / Safety New Services`, `Art of Being Program`
+- Categories (abbreviated to ~3 per program for readability — full list lives in `seed-categories.ts`):
+  - Nutritious Meals Program: `Tea and Coffee`, `Sweeteners`, `Grains`, …
+  - Children's Corner: `Baby Care Products`, `Baby Consumables (Diapers)`, `Formula and Food`, …
+  - Women's Wellness / Safety New Services: `Menstrual Products`, `Oral Care`, `Adult Diapers, Pads`, …
+  - Art of Being Program: `Yarn`, `Watercolor Paper / Sketchbooks`, `Drawing Pencils / Pens`, `Gift Cards`
+- Items: `Canned Black Beans`, `Peanut Butter (16oz)`, `Bananas`, `Toothpaste`, `Size 4 Diapers`, `Rice (5lb bag)`, `Shampoo`, `Apples`, `Pasta`, `Granola Bars` (each maps to one of the categories above)
+- Volunteers: `Jessica M.` (JM), `Maria T.` (MT), `Alex K.` (AK) — multi-actor sample data so History feels alive
 - Sample totals: `$2,847 estimated value`, `134 entries`, top item `Size 4 Diapers`
 - Sample volunteer email: `jessica@wellspring.org`
 
@@ -159,9 +175,10 @@ Build these once and reuse:
 
 ## Out of Scope
 
-- Real auth, networking, persistence
+- Real auth, networking, persistence (this is still a static UI mockup)
 - Animations / transitions / interactive prototypes
-- Admin/catalog management screens
+- Item-level admin screens (inline category CRUD on AI Review is in scope; per-item editing is not)
+- Full audit-log search + multi-filter UI (mobile shows a simple filter chip set only)
 - Onboarding beyond Sign In
 - Settings, notifications, dark mode
 - Real charts (one placeholder bar chart on iPad is enough — render with divs)
@@ -173,7 +190,7 @@ Build these once and reuse:
 
 A working React app where:
 - `src/app/App.tsx` renders a debug navigator + every screen wrapped in a `PhoneFrame` (or `TabletFrame` for screen 8).
-- Each of the 9 screens lives as its own exported component.
+- Each of the 9 screens lives as its own exported component (Sign In / Log Home / Photo Capture / AI Review / Quick Pick / Manual Entry / Reports Mobile / Reports iPad / **History**).
 - Reusable components live in their own files.
 - All sample data is hard-coded — no API calls, no state beyond what's needed for the navigator filter.
 
